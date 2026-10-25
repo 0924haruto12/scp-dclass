@@ -7,7 +7,7 @@ import {
   Subject,
   Trial,
 } from './types';
-import { RUN_LENGTH_DAYS } from './content';
+import { ROLE_EVAL_DAYS, RUN_LENGTH_DAYS, SAFE_REEVAL_UNLOCK_DAY } from './content';
 import { ensureThirtyDaySchedule } from './engine';
 
 export const SAVE_STORAGE_KEY = 'need_to_know_mvp_save_v1';
@@ -226,23 +226,44 @@ export function loadGameState(
     });
 
     const restoredSubject = structuredClone(parsed.Subject);
-    if (restoredSubject.supervisorBadgeEarnedDay === undefined) {
-      restoredSubject.supervisorBadgeEarnedDay = null;
+
+    // Evaluation credits are valid only for the 30-day milestone days. This also
+    // normalizes saves that were already migrated by an intermediate 30-day build.
+    const roleEvalKeys = restoredSubject.rewardedEventKeys.filter((key) =>
+      key.startsWith('role-eval-d')
+    );
+    const validRoleEvalKeys = roleEvalKeys.filter((key) => {
+      const match = key.match(/^role-eval-d(\d+)-/);
+      return match !== null && ROLE_EVAL_DAYS.includes(Number(match[1]));
+    });
+    const validRoleEvalDays = new Set(
+      validRoleEvalKeys.map((key) => Number(key.match(/^role-eval-d(\d+)-/)![1]))
+    );
+    const derivedE = Math.min(2, validRoleEvalDays.size);
+    const evaluationChanged =
+      roleEvalKeys.length !== validRoleEvalKeys.length || restoredSubject.E !== derivedE;
+    if (evaluationChanged) {
+      restoredSubject.rewardedEventKeys = restoredSubject.rewardedEventKeys.filter(
+        (key) => !key.startsWith('role-eval-d') || validRoleEvalKeys.includes(key)
+      );
+      restoredSubject.E = derivedE;
     }
 
-    // Evaluation credits and the supervisor badge earned in the former 7-day
-    // cycle are not valid for the 30-day certification / escape milestones.
-    let legacyProgressReset = false;
-    if (scheduleMigrated) {
-      const hadLegacyEvaluation =
-        restoredSubject.E > 0 ||
-        restoredSubject.rewardedEventKeys.some((key) => key.startsWith('role-eval-d'));
-      if (hadLegacyEvaluation) {
-        restoredSubject.E = 0;
-        restoredSubject.rewardedEventKeys = restoredSubject.rewardedEventKeys.filter(
-          (key) => !key.startsWith('role-eval-d')
-        );
-        legacyProgressReset = true;
+    // The legacy save has no badge-earned day. Keep a normal day-29 award from the
+    // intermediate 30-day build if its safe-task record exists; otherwise clear it.
+    let legacySupervisorBadgeReset = false;
+    let legacySupervisorBadgeInferred = false;
+    if (restoredSubject.supervisorBadgeEarnedDay === undefined) {
+      restoredSubject.supervisorBadgeEarnedDay = null;
+      const day29TaskKey = `night-safe-task-d${SAFE_REEVAL_UNLOCK_DAY}-${restoredSubject.subjectId}`;
+      if (
+        restoredSubject.hasSupervisorBadge &&
+        !scheduleMigrated &&
+        restoredCycle.day >= SAFE_REEVAL_UNLOCK_DAY &&
+        restoredSubject.rewardedEventKeys.includes(day29TaskKey)
+      ) {
+        restoredSubject.supervisorBadgeEarnedDay = SAFE_REEVAL_UNLOCK_DAY;
+        legacySupervisorBadgeInferred = true;
       }
     }
     if (
@@ -253,7 +274,12 @@ export function loadGameState(
       restoredSubject.mandatoryEquipment = restoredSubject.mandatoryEquipment.filter(
         (item) => item !== 'supervisor_badge'
       );
-      legacyProgressReset = true;
+      legacySupervisorBadgeReset = true;
+    } else if (
+      legacySupervisorBadgeInferred &&
+      !restoredSubject.mandatoryEquipment.includes('supervisor_badge')
+    ) {
+      restoredSubject.mandatoryEquipment.push('supervisor_badge');
     }
 
     const migrationNotes: string[] = [];
@@ -262,9 +288,19 @@ export function loadGameState(
         '[保存] 旧7日間サイクルの保存データを30日間スケジュールへ移行しました。現在の日付・被験者・封筒・事後報告履歴は保持されています。'
       );
     }
-    if (legacyProgressReset) {
+    if (evaluationChanged) {
       migrationNotes.push(
-        '[保存] 旧7日間サイクルの役割評価Eおよび監督用名札は、30日ランの16日目・29日目の条件へ引き継がないため初期化しました。'
+        '[保存] 役割評価Eを30日ランの16日目・30日目の完了記録から再計算しました。旧7日間の評価点は引き継ぎません。'
+      );
+    }
+    if (legacySupervisorBadgeReset) {
+      migrationNotes.push(
+        '[保存] 29日目の支給記録がない旧監督用名札を無効化しました。'
+      );
+    }
+    if (legacySupervisorBadgeInferred) {
+      migrationNotes.push(
+        '[保存] 旧形式の監督用名札を29日目の支給として引き継ぎました。'
       );
     }
     if (legacyWaterKeyMigrated) {

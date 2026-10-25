@@ -297,6 +297,84 @@ describe('30日間ラン', () => {
     expect(loaded.state.cycle.endingResult).toBeNull();
   });
 
+  it('既に30日スケジュールへ移行済みの旧E記録も16日目・30日目の完了記録へ正規化する', () => {
+    const backend = new MemoryStorageBackend();
+    const state = createInitialGameState('FIXED-DEFAULT');
+    state.cycle.day = 30;
+    state.subject.C = 3;
+    state.subject.S = 0;
+    state.subject.E = 2;
+    state.subject.rewardedEventKeys.push(
+      `role-eval-d4-${state.subject.subjectId}`,
+      `role-eval-d7-${state.subject.subjectId}`
+    );
+
+    expect(saveGameState(state, backend)).toBe(true);
+    const loaded = loadGameState(backend);
+    expect(loaded.status).toBe('ok');
+    if (loaded.status !== 'ok') return;
+
+    expect(loaded.state.subject.E).toBe(0);
+    expect(
+      loaded.state.subject.rewardedEventKeys.some((key) =>
+        /^role-eval-d(4|7)-/.test(key)
+      )
+    ).toBe(false);
+
+    // Even with C/S in range, missing day-16/day-30 credits cannot yield useful certification.
+    loaded.state.cycle.phase = 'briefing';
+    const trial = startCurrentDayTrial(loaded.state);
+    trial.player.carryingObjective = true;
+    trial.status = 'survived';
+    concludeTrialPhase(loaded.state);
+    submitDebriefResponse(loaded.state, 'choice-silent');
+    expect(loaded.state.subject.E).toBe(1); // Only the day-30 objective was completed
+    expect(loaded.state.cycle.endingResult).toBe('termination_standard');
+  });
+
+  it('中間版の正当な29日目監督用名札は引き継ぎ、支給記録のない名札は無効化する', () => {
+    const backend = new MemoryStorageBackend();
+    const validState = createInitialGameState('FIXED-DEFAULT');
+    validState.cycle.day = 30;
+    validState.subject.hasSupervisorBadge = true;
+    (validState.subject as unknown as { supervisorBadgeEarnedDay?: number | null })
+      .supervisorBadgeEarnedDay = undefined;
+    validState.subject.rewardedEventKeys.push(
+      `night-safe-task-d29-${validState.subject.subjectId}`
+    );
+
+    expect(saveGameState(validState, backend)).toBe(true);
+    const loadedValid = loadGameState(backend);
+    expect(loadedValid.status).toBe('ok');
+    if (loadedValid.status !== 'ok') return;
+
+    expect(loadedValid.state.subject.hasSupervisorBadge).toBe(true);
+    expect(loadedValid.state.subject.supervisorBadgeEarnedDay).toBe(29);
+    expect(loadedValid.state.subject.mandatoryEquipment).toContain('supervisor_badge');
+
+    loadedValid.state.cycle.phase = 'morning';
+    proceedFromMorning(loadedValid.state, 'attempt_escape_with_supervisor_badge');
+    expect(loadedValid.state.cycle.endingResult).toBe('escape_attempt');
+
+    const invalidState = createInitialGameState('FIXED-DEFAULT');
+    invalidState.cycle.day = 30;
+    invalidState.subject.hasSupervisorBadge = true;
+    (invalidState.subject as unknown as { supervisorBadgeEarnedDay?: number | null })
+      .supervisorBadgeEarnedDay = undefined;
+
+    expect(saveGameState(invalidState, backend)).toBe(true);
+    const loadedInvalid = loadGameState(backend);
+    expect(loadedInvalid.status).toBe('ok');
+    if (loadedInvalid.status !== 'ok') return;
+
+    expect(loadedInvalid.state.subject.hasSupervisorBadge).toBe(false);
+    expect(loadedInvalid.state.subject.supervisorBadgeEarnedDay).toBeNull();
+    loadedInvalid.state.cycle.phase = 'morning';
+    proceedFromMorning(loadedInvalid.state, 'attempt_escape_with_supervisor_badge');
+    expect(loadedInvalid.state.cycle.phase).toBe('briefing');
+    expect(loadedInvalid.state.cycle.endingResult).toBeNull();
+  });
+
   it('30日終了後に新サイクルを開始すると、日付が1日に戻り施設コードだけが進む', () => {
     const state = createInitialGameState('FIXED-DEFAULT');
     state.cycle.day = 30;
