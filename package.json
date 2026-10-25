@@ -1,0 +1,13 @@
+{
+  "name": "need-to-know-prototype",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node tools/serve.mjs",
+    "test": "node --test",
+    "test:browser": "node tools/browser-smoke.mjs",
+    "check": "node --check src/game.js && node --check src/app.js && node --check src/storage.js"
+  },
+  "engines": { "node": ">=22" }
+}
