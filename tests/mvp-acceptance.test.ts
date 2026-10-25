@@ -26,10 +26,13 @@ import {
   verifyWhiteDoorMapConstraints,
 } from '../src/core/trials';
 import {
+  archiveCorruptedAndClearSave,
+  CORRUPTED_BACKUP_KEY,
   loadGameState,
   MemoryStorageBackend,
   SAVE_STORAGE_KEY,
   saveGameState,
+  StorageBackend,
 } from '../src/core/storage';
 
 describe('NEED TO KNOW MVP Acceptance Criteria (AC01 - AC15)', () => {
@@ -540,5 +543,71 @@ describe('NEED TO KNOW MVP Acceptance Criteria (AC01 - AC15)', () => {
     const saveAllowed = saveGameState(fresh, storage);
     expect(saveAllowed).toBe(false);
     expect(storage.getItem(SAVE_STORAGE_KEY)).toBe(corruptedPayload);
+  });
+});
+
+class WriteFailingBackend implements StorageBackend {
+  constructor(
+    private readonly inner: StorageBackend,
+    private readonly failKey: string
+  ) {}
+
+  getItem(key: string): string | null {
+    return this.inner.getItem(key);
+  }
+
+  setItem(key: string, value: string): void {
+    if (key === this.failKey) {
+      throw new Error('QuotaExceededError (simulated)');
+    }
+    this.inner.setItem(key, value);
+  }
+
+  removeItem(key: string): void {
+    this.inner.removeItem(key);
+  }
+}
+
+describe('ストレージ障害時の保護（統合版で追加）', () => {
+  it('保存容量エラーでも例外を投げず、既存の正常なセーブを保持する', () => {
+    const inner = new MemoryStorageBackend();
+    const state = createInitialGameState('FIXED-DEFAULT');
+    expect(saveGameState(state, inner)).toBe(true);
+    const before = inner.getItem(SAVE_STORAGE_KEY);
+    expect(before).not.toBeNull();
+
+    const failing = new WriteFailingBackend(inner, SAVE_STORAGE_KEY);
+    const changed = createInitialGameState('SEED-OTHER');
+
+    expect(() => saveGameState(changed, failing)).not.toThrow();
+    expect(saveGameState(changed, failing)).toBe(false);
+    expect(inner.getItem(SAVE_STORAGE_KEY)).toBe(before);
+  });
+
+  it('破損データの退避に失敗しても元データを削除しない', () => {
+    const inner = new MemoryStorageBackend();
+    const corrupted = '{ "schemaVersion": "1.0", "FacilityCycle": broken';
+    inner.setItem(SAVE_STORAGE_KEY, corrupted);
+    const failing = new WriteFailingBackend(inner, CORRUPTED_BACKUP_KEY);
+
+    expect(archiveCorruptedAndClearSave(failing)).toBe(false);
+    expect(inner.getItem(SAVE_STORAGE_KEY)).toBe(corrupted);
+
+    const loaded = loadGameState(failing);
+    expect(loaded.status).toBe('corrupted');
+    if (loaded.status === 'corrupted') {
+      expect(loaded.rawOriginal).toBe(corrupted);
+      expect(loaded.originalPreserved).toBe(true);
+    }
+  });
+
+  it('破損データの退避に成功した場合だけ保存枠を初期化する', () => {
+    const inner = new MemoryStorageBackend();
+    const corrupted = '{ "schemaVersion": "1.0", "FacilityCycle": broken';
+    inner.setItem(SAVE_STORAGE_KEY, corrupted);
+
+    expect(archiveCorruptedAndClearSave(inner)).toBe(true);
+    expect(inner.getItem(SAVE_STORAGE_KEY)).toBeNull();
+    expect(inner.getItem(CORRUPTED_BACKUP_KEY)).toBe(corrupted);
   });
 });

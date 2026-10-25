@@ -749,6 +749,19 @@ button:disabled {
   gap: 14px;
 }
 
+.trial-resume-banner {
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid var(--accent-amber);
+  padding: 10px 14px;
+  border-radius: 6px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 10px;
+}
+
+
 @media (max-width: 860px) {
   .trial-layout {
     grid-template-columns: 1fr;

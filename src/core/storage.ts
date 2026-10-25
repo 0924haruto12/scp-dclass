@@ -53,6 +53,23 @@ export function getDefaultStorageBackend(): StorageBackend {
   return new MemoryStorageBackend();
 }
 
+function tryGetItem(backend: StorageBackend, key: string): { ok: boolean; value: string | null } {
+  try {
+    return { ok: true, value: backend.getItem(key) };
+  } catch {
+    return { ok: false, value: null };
+  }
+}
+
+function trySetItem(backend: StorageBackend, key: string, value: string): boolean {
+  try {
+    backend.setItem(key, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function serializeGameState(state: GameState): string {
   const payload: SerializedSaveRecords = {
     schemaVersion: '1.0',
@@ -121,23 +138,26 @@ export function saveGameState(
   backend: StorageBackend = getDefaultStorageBackend()
 ): boolean {
   // Per Section 9 & AC15: Never overwrite unreadable/corrupted save automatically
-  const existingRaw = backend.getItem(SAVE_STORAGE_KEY);
+  const existing = tryGetItem(backend, SAVE_STORAGE_KEY);
+  if (!existing.ok) {
+    return false;
+  }
+  const existingRaw = existing.value;
   if (existingRaw !== null) {
     try {
       const parsed = JSON.parse(existingRaw);
       if (!isValidSerializedSave(parsed)) {
-        backend.setItem(CORRUPTED_BACKUP_KEY, existingRaw);
+        trySetItem(backend, CORRUPTED_BACKUP_KEY, existingRaw);
         return false;
       }
     } catch {
-      backend.setItem(CORRUPTED_BACKUP_KEY, existingRaw);
+      trySetItem(backend, CORRUPTED_BACKUP_KEY, existingRaw);
       return false;
     }
   }
 
   const serialized = serializeGameState(state);
-  backend.setItem(SAVE_STORAGE_KEY, serialized);
-  return true;
+  return trySetItem(backend, SAVE_STORAGE_KEY, serialized);
 }
 
 /**
@@ -149,20 +169,34 @@ export function saveGameState(
 export function loadGameState(
   backend: StorageBackend = getDefaultStorageBackend()
 ): LoadSaveResult {
-  const raw = backend.getItem(SAVE_STORAGE_KEY);
+  const stored = tryGetItem(backend, SAVE_STORAGE_KEY);
+  if (!stored.ok) {
+    return {
+      status: 'corrupted',
+      error: '保存領域を読み取れませんでした。ブラウザのストレージ設定を確認してください。',
+      rawOriginal: '',
+      originalPreserved: false,
+    };
+  }
+  const raw = stored.value;
   if (raw === null) {
     return { status: 'empty' };
   }
 
+  const preserveOriginal = (): boolean => {
+    const current = tryGetItem(backend, SAVE_STORAGE_KEY);
+    return current.ok && current.value === raw;
+  };
+
   try {
     const parsed = JSON.parse(raw);
     if (!isValidSerializedSave(parsed)) {
-      backend.setItem(CORRUPTED_BACKUP_KEY, raw);
+      trySetItem(backend, CORRUPTED_BACKUP_KEY, raw);
       return {
         status: 'corrupted',
         error: '保存データのスキーマ検証に失敗しました。元データは上書きせず保持されています。',
         rawOriginal: raw,
-        originalPreserved: backend.getItem(SAVE_STORAGE_KEY) === raw,
+        originalPreserved: preserveOriginal(),
       };
     }
 
@@ -194,27 +228,39 @@ export function loadGameState(
 
     return { status: 'ok', state: restoredState };
   } catch (err) {
-    backend.setItem(CORRUPTED_BACKUP_KEY, raw);
+    trySetItem(backend, CORRUPTED_BACKUP_KEY, raw);
     return {
       status: 'corrupted',
       error: `保存データのJSON解析に失敗しました（${
         err instanceof Error ? err.message : 'parse error'
       }）。元データは上書きせず保持されています。`,
       rawOriginal: raw,
-      originalPreserved: backend.getItem(SAVE_STORAGE_KEY) === raw,
+      originalPreserved: preserveOriginal(),
     };
   }
 }
 
 /**
  * Explicit user action to archive corrupted save and reset storage slot.
+ * Returns false without deleting the slot if the backup cannot be written.
  */
 export function archiveCorruptedAndClearSave(
   backend: StorageBackend = getDefaultStorageBackend()
-): void {
-  const raw = backend.getItem(SAVE_STORAGE_KEY);
-  if (raw !== null) {
-    backend.setItem(CORRUPTED_BACKUP_KEY, raw);
+): boolean {
+  const stored = tryGetItem(backend, SAVE_STORAGE_KEY);
+  if (!stored.ok) {
+    return false;
   }
-  backend.removeItem(SAVE_STORAGE_KEY);
+  const raw = stored.value;
+  if (raw !== null) {
+    if (!trySetItem(backend, CORRUPTED_BACKUP_KEY, raw)) {
+      return false;
+    }
+  }
+  try {
+    backend.removeItem(SAVE_STORAGE_KEY);
+    return true;
+  } catch {
+    return false;
+  }
 }

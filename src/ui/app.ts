@@ -62,6 +62,8 @@ export class NeedToKnowApp {
   private manualMoveOverride: { moveX: number; moveY: number; mode: MoveMode } | null = null;
   private animFrameId: number | null = null;
   private lastFrameTime = 0;
+  private lastAutoSaveAt = 0;
+  private saveFailureReported = false;
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -91,8 +93,20 @@ export class NeedToKnowApp {
       // Do not overwrite corrupted save until user explicitly resolves it (AC15)
       return;
     }
-    if (this.state.cycle.phase !== 'title') {
-      saveGameState(this.state);
+    if (this.state.cycle.phase === 'title') {
+      return;
+    }
+    const saved = saveGameState(this.state);
+    this.lastAutoSaveAt = performance.now();
+    if (saved) {
+      this.saveFailureReported = false;
+      return;
+    }
+    if (!this.saveFailureReported) {
+      this.saveFailureReported = true;
+      this.state.lastActionLog.push(
+        '[保存] 保存に失敗しました。ブラウザの空き容量・ストレージ設定を確認してください。元のデータは保持されています。'
+      );
     }
   }
 
@@ -103,6 +117,19 @@ export class NeedToKnowApp {
         this.autoSave();
         this.renderUI();
       }
+    });
+
+    // Reload/close can happen without a blur event on some browsers.
+    window.addEventListener('pagehide', () => {
+      this.autoSave();
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'hidden') return;
+      if (this.state.trial && this.state.trial.status === 'active') {
+        setTrialPause(this.state.trial, 'blur');
+      }
+      this.autoSave();
     });
 
     window.addEventListener('keydown', (e) => {
@@ -158,6 +185,15 @@ export class NeedToKnowApp {
         this.state.trial.status === 'active'
       ) {
         this.stepActiveTrialFromInputs(dt);
+        // AC03: preserve an in-progress trial (including warning clocks) across reloads.
+        if (
+          this.state.trial.status === 'active' &&
+          now - this.lastAutoSaveAt >= 2000 &&
+          !this.state.corruptedSaveNotice
+        ) {
+          this.lastAutoSaveAt = now;
+          this.autoSave();
+        }
       }
 
       if (this.renderer && this.state.cycle.phase === 'trial') {
@@ -1064,6 +1100,20 @@ export class NeedToKnowApp {
       trial.instructions[trial.instructions.length - 1];
 
     return `
+      ${
+        trial.status === 'paused' &&
+        (trial.pauseReason === 'pause_menu' || trial.pauseReason === 'blur')
+          ? `
+        <div class="trial-resume-banner" role="status">
+          <div>
+            <strong>実験は一時停止中です。</strong>
+            再開すると、位置・残り時間・警告の経過を保ったまま続きから再開します。
+          </div>
+          <button type="button" class="btn-primary" id="btn-resume-trial">実験を再開</button>
+        </div>
+      `
+          : ''
+      }
       <div class="trial-layout">
         <div class="trial-canvas-col">
           <div class="trial-status-bar">
@@ -1516,7 +1566,14 @@ export class NeedToKnowApp {
 
     // Corrupted save resolution button
     document.getElementById('btn-resolve-corrupted')?.addEventListener('click', () => {
-      archiveCorruptedAndClearSave();
+      const archived = archiveCorruptedAndClearSave();
+      if (!archived) {
+        this.state.lastActionLog.push(
+          '[保存] 破損データの退避に失敗したため、元データを削除せず保持しました。空き容量を確認してください。'
+        );
+        this.renderUI();
+        return;
+      }
       this.state.corruptedSaveNotice = null;
       this.autoSave();
       this.renderUI();
@@ -1626,6 +1683,16 @@ export class NeedToKnowApp {
       if (this.state.trial) {
         this.flushNewAudioCues(this.state.trial);
       }
+      this.autoSave();
+      this.renderUI();
+    });
+
+    // Resume a trial restored from a save (AC03)
+    document.getElementById('btn-resume-trial')?.addEventListener('click', () => {
+      if (!this.state.trial) return;
+      this.notebookOpen = false;
+      this.settingsModalOpen = false;
+      setTrialPause(this.state.trial, 'none');
       this.autoSave();
       this.renderUI();
     });
