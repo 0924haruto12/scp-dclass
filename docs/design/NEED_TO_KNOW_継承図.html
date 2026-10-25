@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NEED TO KNOW 継承の仕様案</title>
+<style>
+*{box-sizing:border-box}body{margin:0;color:var(--foreground,#242424);font:14px/1.65 var(--font-sans,system-ui,sans-serif)}
+p{margin:0 0 14px}.tag{font:12px var(--font-mono,monospace);color:var(--muted-foreground,#666)}
+.lead{font-size:20px;font-weight:650;line-height:1.5;margin:8px 0 16px}
+.flow{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin:0 0 20px}.step{border:1px solid var(--border,#ddd);border-radius:6px;padding:7px 12px}.arrow{color:var(--muted-foreground,#666)}.trial{border-color:var(--accent,#777);font-weight:650}
+.tabs{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px}button{font:inherit;color:inherit;background:transparent;border:1px solid var(--border,#ddd);border-radius:7px;padding:8px 12px;cursor:pointer}button[aria-pressed="true"]{background:var(--primary,#333);color:var(--primary-foreground,#fff);border-color:var(--primary,#333)}button:focus-visible{outline:2px solid var(--ring,#777);outline-offset:3px}
+.panel{background:var(--card,#f6f6f6);border-radius:var(--radius,10px);padding:18px;margin-bottom:15px}.panel h3{font-size:16px;margin:0 0 5px}.panel p{font-size:13px;color:var(--muted-foreground,#666);margin-bottom:14px}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr);gap:0 16px}.cell{padding:10px 0;border-top:1px solid var(--border,#ddd)}.label{color:var(--muted-foreground,#666)}.value{font-weight:550}.note{font-size:12px;color:var(--muted-foreground,#666)}
+.principle{border-left:3px solid var(--accent,#777);padding-left:13px;margin-top:16px}.principle strong{display:block;margin-bottom:3px}.principle p{margin:0;font-size:13px}
+@media(max-width:430px){.lead{font-size:18px}.step{padding:6px 8px}.flow{gap:5px}.panel{padding:16px}.grid{grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);gap:0 10px}button{font-size:13px;padding:8px 10px}}
+</style>
+</head>
+<body>
+<div class="tag">NEED TO KNOW · draft 0.1 · 採否未確定</div>
+<div class="lead">人物が変わっても、施設のルールは変わらない。</div>
+<div class="flow" aria-label="1日の流れ"><span class="step">朝</span><span class="arrow">→</span><span class="step">召集</span><span class="arrow">→</span><span class="step trial">実験</span><span class="arrow">→</span><span class="step">事後</span><span class="arrow">→</span><span class="step">夜</span></div>
+<div class="tabs" aria-label="状態の変化を選択">
+<button type="button" data-mode="death" aria-pressed="true">死亡で交代</button>
+<button type="button" data-mode="memory" aria-pressed="false">記憶処理</button>
+<button type="button" data-mode="new" aria-pressed="false">新サイクル</button>
+</div>
+<section class="panel" aria-live="polite" aria-atomic="true">
+<h3 id="heading"></h3><p id="description"></p>
+<div class="grid" id="matrix"></div>
+</section>
+<p class="note">死亡で翌日へ進めるのは1〜6日目。7日目の死亡は「処分・欠員補充停止」で終了。報告履歴はプレイヤー用で、新人物の所持情報には含めない。</p>
+<div class="principle"><strong>学習を罰しない</strong><p>前兆を見て回避しただけでは疑念を加算しない。研究員が記録した無許可行動や、聴取で明かした内容から判断する。</p></div>
+<script>
+const modes={
+ death:{heading:'死亡報告 → 翌朝、新しい被験者',description:'同じ施設で検証を続ける。前任者の隠したメモは、次の人物が自分で見つける。',rows:[['施設の日付','1日進む'],['異常のルール','同じ条件を保持'],['信用・疑念・評価','新人物の初期値へ'],['携帯ノート・個人効果','回収・取消'],['寝台下のメモ','残る／発見して読む'],['プレイヤーの報告履歴','保持']]},
+ memory:{heading:'同じ被験者に記憶処理',description:'人物も施設も変わらない。直近1日の携帯ノートの写しを消し、疑念を下げる。',rows:[['施設の日付','処置だけでは進めない'],['異常のルール','同じ条件を保持'],['信用・評価','保持／疑念は1へ'],['携帯ノート','直近1日の写しを消去'],['寝台下のメモ','保持／自分で再発見'],['プレイヤーの報告履歴','保持']]},
+ new:{heading:'エンド後、明示的に新しい施設サイクルへ',description:'変動するのはこのときだけ。旧施設の報告には日付と施設コードを付け、現在の事実と区別する。',rows:[['施設の日付','1日目へ戻す'],['異常のルール','各異常の1条件を再抽選'],['信用・疑念・評価','初期値へ'],['携帯ノート・個人効果','初期化'],['寝台下のメモ','初期化'],['プレイヤーの報告履歴','旧施設の記録として保持']]}
+};
+function render(mode){const item=modes[mode];document.getElementById('heading').textContent=item.heading;document.getElementById('description').textContent=item.description;const matrix=document.getElementById('matrix');matrix.replaceChildren();for(const [label,value] of item.rows){for(const [text,cls] of [[label,'label'],[value,'value']]){const div=document.createElement('div');div.className='cell '+cls;div.textContent=text;matrix.append(div);}}for(const b of document.querySelectorAll('button'))b.setAttribute('aria-pressed',String(b.dataset.mode===mode));}
+for(const b of document.querySelectorAll('button'))b.addEventListener('click',()=>render(b.dataset.mode));render('death');
+console.log('states='+Object.keys(modes).length+'; rows='+modes.death.rows.length);
+for(const mode of Object.keys(modes)){render(mode);if(document.querySelectorAll('.cell').length!==12)throw Error('row count: '+mode);}render('death');
+requestAnimationFrame(()=>console.log('viewport='+document.documentElement.clientWidth+'; scrollWidth='+document.documentElement.scrollWidth));
+</script>
+</body>
+</html>
