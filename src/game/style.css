@@ -1,0 +1,400 @@
+:root {
+  --bg: #0b0c0c;
+  --panel: #141615;
+  --ink: #d9d6cc;
+  --muted: #8d8a80;
+  --line: #2c2f2d;
+  --paper: #e7e2d3;
+  --paper-ink: #1d1c19;
+  --accent: #b9b4a4;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: 'Hiragino Sans', 'Noto Sans JP', 'Yu Gothic', system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+#app {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 16px 48px;
+}
+
+#topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+  font-family: 'Courier New', monospace;
+  letter-spacing: 0.08em;
+}
+
+#topbar small {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+#topinfo {
+  color: var(--muted);
+  font-size: 12px;
+  text-align: right;
+}
+
+main {
+  padding-top: 20px;
+}
+
+h1 {
+  font-family: 'Courier New', monospace;
+  font-size: 44px;
+  letter-spacing: 0.2em;
+  margin: 24px 0 0;
+}
+
+h2 {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  border-left: 3px solid var(--accent);
+  padding-left: 10px;
+  margin: 8px 0 16px;
+}
+
+h3 {
+  font-size: 15px;
+  margin: 0 0 8px;
+}
+
+p {
+  margin: 4px 0;
+}
+
+.subtitle {
+  color: var(--accent);
+  letter-spacing: 0.12em;
+}
+
+.meta {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.blank {
+  color: var(--muted);
+  font-style: italic;
+}
+
+button {
+  font: inherit;
+  color: var(--ink);
+  background: #22252a00;
+  border: 1px solid var(--accent);
+  padding: 8px 16px;
+  cursor: pointer;
+  border-radius: 2px;
+}
+
+button:hover:not(:disabled) {
+  background: #2a2d2b;
+}
+
+button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+button.ghost {
+  border-color: #4a4d49;
+  color: #bdb9ae;
+}
+
+button:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.menu {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 18px 0;
+}
+
+.menu.column {
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.controls {
+  margin-top: 24px;
+  padding: 12px 16px;
+  border: 1px dashed var(--line);
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.warn {
+  border: 1px solid #7a5a2a;
+  background: #1d1810;
+  padding: 10px 14px;
+  margin: 16px 0;
+}
+
+.status-block {
+  border-left: 2px solid var(--line);
+  padding-left: 12px;
+  margin: 12px 0;
+}
+
+.note-line {
+  color: var(--muted);
+}
+
+.doc {
+  background: var(--paper);
+  color: var(--paper-ink);
+  padding: 16px 20px;
+  margin: 14px 0;
+  font-family: 'Hiragino Mincho ProN', 'Noto Serif JP', 'Yu Mincho', serif;
+  max-width: 760px;
+  box-shadow: 0 1px 0 #000;
+}
+
+.doc .meta {
+  color: #5c594f;
+}
+
+.doc.dark {
+  background: #1a1918;
+  color: #cfcabb;
+  border: 1px solid #3a3733;
+}
+
+.doc.report .fragment {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #b6b09d;
+}
+
+.doc.dark .fragment {
+  border-top-color: #3a3733;
+}
+
+.redacted {
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.bar {
+  background: currentColor;
+  letter-spacing: -0.1em;
+}
+
+.speech {
+  margin: 12px 0;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.speaker {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  font-family: 'Courier New', monospace;
+}
+
+/* 実験画面 */
+
+#stage canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #000;
+  border: 1px solid var(--line);
+  image-rendering: auto;
+}
+
+#hud {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+#dialogue {
+  min-height: 52px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+
+#responses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 38px;
+}
+
+button.response {
+  padding: 4px 12px;
+  font-size: 13px;
+}
+
+#captions {
+  min-height: 48px;
+  color: #f1eee4;
+  font-size: 15px;
+}
+
+#captions p {
+  margin: 0;
+}
+
+#status {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+#dev {
+  margin-top: 8px;
+  padding: 8px;
+  font-size: 12px;
+  color: #d892d8;
+  border: 1px dashed #5a2f5a;
+  white-space: pre-wrap;
+}
+
+/* モーダル */
+
+#modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.78);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 40px 16px;
+  overflow-y: auto;
+  z-index: 10;
+}
+
+#modal[hidden] {
+  display: none;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  padding: 20px 24px;
+  width: min(760px, 100%);
+}
+
+.notes-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin: 8px 0 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.tab {
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+}
+
+.tab.active {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+}
+
+.card {
+  border: 1px solid var(--line);
+  padding: 10px 12px;
+  margin: 8px 0;
+  font-family: 'Hiragino Mincho ProN', 'Noto Serif JP', 'Yu Mincho', serif;
+}
+
+.card.erased {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.card .label {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.hyp-name {
+  font-weight: 600;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0;
+}
+
+.field.inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+
+input[type='text'],
+textarea {
+  font: inherit;
+  background: #0e0f0f;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  padding: 6px 8px;
+}
+
+.doc input[type='text'],
+.doc textarea {
+  background: #f6f2e6;
+  color: var(--paper-ink);
+  border-color: #b6b09d;
+}
+
+.evidence {
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.evidence-item {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 13px;
+  margin: 4px 0;
+}
+
+.archive-item {
+  margin-bottom: 18px;
+}

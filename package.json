@@ -1,0 +1,19 @@
+{
+  "name": "need-to-know-prototype",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "NEED TO KNOW 歩調縦切りの試作（エンジン選定前のブラウザ版）",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
+  }
+}

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:," />
+    <title>NEED TO KNOW（仮題）— 歩調 縦切り試作</title>
+  </head>
+  <body>
+    <div id="app">
+      <header id="topbar">
+        <span class="brand">NEED TO KNOW<small>（仮題）</small></span>
+        <span id="topinfo"></span>
+      </header>
+      <main>
+        <section id="screen"></section>
+        <section id="stage" hidden>
+          <canvas id="view" aria-label="試験室の見下ろし表示"></canvas>
+          <div id="hud">
+            <div id="dialogue" aria-live="polite"></div>
+            <div id="responses"></div>
+            <div id="captions" aria-live="polite"></div>
+            <div id="status"></div>
+          </div>
+          <pre id="dev" hidden></pre>
+        </section>
+      </main>
+      <div id="modal" hidden></div>
+    </div>
+    <script type="module" src="./src/game/main.ts"></script>
+  </body>
+</html>
