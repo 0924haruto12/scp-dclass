@@ -12,7 +12,7 @@
 
 ## ライセンス記述の参考資料
 
-設計レビューは、以下の一次資料を参照してライセンス記述を照合しています。以下の資料自体はリポジトリに転載していません。
+設計レビューは以下の一次資料を参照してライセンス記述を照合しています。以下の資料自体はリポジトリに転載していません。
 
 - [Licensing Guide](https://scp-wiki.wikidot.com/licensing-guide) — DrClef / SCP Wiki。CC BY-SA。SCP由来の作品の帰属・継承に関するガイド。
 - [Compatible Licenses](https://creativecommons.org/compatible-licenses/) — Creative Commons。BY-SAの版別の互換条件。
