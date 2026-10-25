@@ -472,20 +472,21 @@ describe('NEED TO KNOW MVP Acceptance Criteria (AC01 - AC15)', () => {
     expect(deathFragments[0]).not.toContain('許容速度2.5');
   });
 
-  it('AC14: On Day 7, overlapping ending conditions strictly follow the priority table (1: Escape Attempt > 2: Day 7 Death > 3: Certified Useful > 4: Standard Termination)', () => {
-    // Case 1: Subject has E=2, C=3, S=0 (eligible for Certified Useful) AND Supervisor Badge -> chooses Escape Attempt on Day 7 Morning -> Priority 1 wins
+  it('AC14: On Day 30, overlapping ending conditions strictly follow the priority table (1: Escape Attempt > 2: Day 30 Death > 3: Certified Useful > 4: Standard Termination)', () => {
+    // Case 1: Subject has E=2, C=3, S=0 (eligible for Certified Useful) AND Supervisor Badge -> chooses Escape Attempt on Day 30 Morning -> Priority 1 wins
     const s1 = createInitialGameState('FIXED-DEFAULT');
-    s1.cycle.day = 7;
+    s1.cycle.day = 30;
     s1.subject.E = 2;
     s1.subject.C = 3;
     s1.subject.S = 0;
     s1.subject.hasSupervisorBadge = true;
+    s1.subject.supervisorBadgeEarnedDay = 29;
     proceedFromMorning(s1, 'attempt_escape_with_supervisor_badge');
     expect(s1.cycle.endingResult).toBe('escape_attempt');
 
-    // Case 2: Subject has E=2, C=3, S=0 on Day 7, enters final trial and dies -> Priority 2 (termination_shortage) wins over Certified Useful
+    // Case 2: Subject has E=2, C=3, S=0 on Day 30, enters final trial and dies -> Priority 2 (termination_shortage) wins over Certified Useful
     const s2 = createInitialGameState('FIXED-DEFAULT');
-    s2.cycle.day = 7;
+    s2.cycle.day = 30;
     s2.subject.E = 2;
     s2.subject.C = 3;
     s2.subject.S = 0;
@@ -495,10 +496,10 @@ describe('NEED TO KNOW MVP Acceptance Criteria (AC01 - AC15)', () => {
     proceedFromDeathReport(s2);
     expect(s2.cycle.endingResult).toBe('termination_shortage');
 
-    // Case 3: Subject survives Day 7 with E=2, C=2, S=1 -> Priority 3 (certified_useful)
+    // Case 3: Subject survives Day 30 with E=1, C=2, S=1 -> Priority 3 (certified_useful)
     const s3 = createInitialGameState('FIXED-DEFAULT');
-    s3.cycle.day = 7;
-    s3.subject.E = 1; // +1 from Day 4, will gain +1 on Day 7 survival -> E=2
+    s3.cycle.day = 30;
+    s3.subject.E = 1; // +1 from the final-day T-101 objective -> E=2
     s3.subject.C = 2;
     s3.subject.S = 1;
     const t3 = startCurrentDayTrial(s3);
@@ -510,10 +511,10 @@ describe('NEED TO KNOW MVP Acceptance Criteria (AC01 - AC15)', () => {
     expect(s3.subject.E).toBe(2);
     expect(s3.cycle.endingResult).toBe('certified_useful');
 
-    // Case 4: Subject survives Day 7 after a mid-cycle death replacement (so E=1 < 2) -> Priority 4 (termination_standard)
+    // Case 4: Subject survives Day 30 after a mid-cycle death replacement (so E=1 < 2) -> Priority 4 (termination_standard)
     const s4 = createInitialGameState('FIXED-DEFAULT');
-    s4.cycle.day = 7;
-    s4.subject.E = 0; // Replaced subject missed Day 4 E+1 -> only gets +1 on Day 7 -> E=1
+    s4.cycle.day = 30;
+    s4.subject.E = 0; // Replaced subject missed the Day 16 evaluation -> only gets +1 on Day 30 -> E=1
     s4.subject.C = 3;
     s4.subject.S = 0;
     const t4 = startCurrentDayTrial(s4);

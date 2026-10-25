@@ -25,10 +25,10 @@ export type WhiteDoorPhase = 'A' | 'B';
 export type WhiteDoorRoomId = 'ANTEROOM' | 'E' | 'X' | 'Y' | 'P';
 
 export type EndingType =
-  | 'escape_attempt'          // 1: 脱走未遂 (7日目の朝、監督用名札で外門の検問まで進む)
-  | 'termination_shortage'    // 2: 処分・欠員補充停止 (7日目に現人物が死亡)
+  | 'escape_attempt'          // 1: 脱走未遂 (30日目の朝、監督用名札で外門の検問まで進む)
+  | 'termination_shortage'    // 2: 処分・欠員補充停止 (30日目に現人物が死亡)
   | 'certified_useful'        // 3: 有用認定 (最終業務を生還し、現人物のE=2、C>=2、S<=1)
-  | 'termination_standard';   // 4: 処分 (その他の7日目終了)
+  | 'termination_standard';   // 4: 処分 (その他の30日目終了)
 
 export type OptionalItemId = 'pencil' | 'paper_strip' | 'small_mirror';
 
@@ -106,7 +106,7 @@ export interface FacilityCycle {
   seed: string;
   isPracticeFixedMode: boolean;
   version: string;
-  day: number; // 1..7
+  day: number; // 1..30
   phase: CyclePhase;
   morningActionsLeft: number; // 0..2
   nightActionsLeft: number; // 0..2
@@ -115,6 +115,7 @@ export interface FacilityCycle {
   envelope: EnvelopeItem[]; // Max 3 items under bunk bed
   envelopeOpenedToday: boolean;
   waterCoolerPresent: boolean;
+  waterCoolerInstallDay: number | null; // Day of the current water-cooler placement (2 / 12 / 22)
   processedEventIds: string[]; // Prevents duplicate execution on resume
   endingResult: EndingType | null;
 }
@@ -128,6 +129,7 @@ export interface Subject {
   badgeEverWornThisTrial: boolean;
   badgeTargetStatus: 'none' | 'hazard_uncorrected' | 'hazard_corrected' | 'ration_priority';
   hasSupervisorBadge: boolean;
+  supervisorBadgeEarnedDay: number | null;
   C: number; // 0..3 Compliance (信用)
   S: number; // 0..3 Suspicion (疑念)
   E: number; // 0..2 Role Evaluation (役割評価)

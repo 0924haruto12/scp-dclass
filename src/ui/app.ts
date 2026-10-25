@@ -3,15 +3,21 @@ import {
   CELLMATES,
   ENDING_DESCRIPTIONS,
   getDebriefChoices,
+  getRunStage,
   OPTIONAL_ITEM_LABELS,
   ORIENTATION_DOCUMENT,
   RESEARCHER_PROFILES,
+  RUN_LENGTH_DAYS,
+  SAFE_REEVAL_UNLOCK_DAY,
+  SUPERVISOR_BADGE_CODE,
+  WATER_COOLER_INSTALL_DAYS,
 } from '../core/content';
 import {
   acquireOptionalItem,
   concludeTrialPhase,
   copyItemsToEnvelopeAtNight,
   createInitialGameState,
+  getDayScheduleEntry,
   handleComparisonInterviewAction,
   inspectEnvelopeInMorning,
   interactWaterCoolerInMorning,
@@ -369,10 +375,10 @@ export class NeedToKnowApp {
 
     const evalStatus =
       E >= 2
-        ? '再回収実績：2回達成（専属要員候補）'
+        ? '役割評価：2回達成（有用認定候補）'
         : E === 1
-        ? '再回収実績：1回達成'
-        : '再回収実績：未達成';
+        ? '役割評価：1回達成'
+        : '役割評価：未達成';
 
     return { rationStatus, securityStatus, evalStatus };
   }
@@ -443,6 +449,7 @@ export class NeedToKnowApp {
   public renderUI(): void {
     const { cycle, subject } = this.state;
     const { rationStatus, securityStatus, evalStatus } = this.getDescriptiveStatusText();
+    const runStage = getRunStage(cycle.day);
 
     this.root.innerHTML = `
       <div class="ntk-shell">
@@ -453,7 +460,8 @@ export class NeedToKnowApp {
           </div>
           <div class="ntk-meta-bar">
             <div class="meta-chip">施設コード: <strong>${this.escapeHtml(cycle.cycleId)}</strong></div>
-            <div class="meta-chip">暦日: <strong>第 ${cycle.day} / 7 日</strong></div>
+            <div class="meta-chip">暦日: <strong>第 ${cycle.day} / ${RUN_LENGTH_DAYS} 日</strong></div>
+            <div class="meta-chip">期: <strong>${runStage.label}</strong></div>
             <div class="meta-chip">被験者: <strong>${this.escapeHtml(subject.subjectId)}</strong>${
               subject.displayedBadgeNumber !== subject.subjectId
                 ? ` <span class="badge-override">(外見名札: ${this.escapeHtml(
@@ -522,7 +530,9 @@ export class NeedToKnowApp {
                 ? subject.inventory.map((i) => OPTIONAL_ITEM_LABELS[i].name).join('、')
                 : 'なし'
             }${
-              subject.hasSupervisorBadge ? ' ＋【監督用名札 SUP-07】' : ''
+              subject.hasSupervisorBadge
+                ? ` ＋【監督用名札 ${SUPERVISOR_BADGE_CODE}】`
+                : ''
             }</span>
           </div>
           ${
@@ -597,10 +607,10 @@ export class NeedToKnowApp {
       return `
         <div class="phase-card title-screen">
           <div class="dossier-stamp">RESTRICTED // NEED TO KNOW</div>
-          <h2>NEED TO KNOW — 7日間MVP検証プロトタイプ</h2>
+          <h2>NEED TO KNOW — 30日間ラン検証プロトタイプ</h2>
           <p class="lead-copy">
             あなたは何を担当させられるのか知らされないまま収容区画へ送り込まれるDクラス職員である。<br>
-            異常の正式名称もオブジェクトクラスも開示されない。前兆を観察し、推理ノートで仮説を組み、指示に潜む危険を見極めて生き延びよ。
+            異常の正式名称もオブジェクトクラスも開示されない。30日目の月末処分まで、前兆を観察し、推理ノートで仮説を組み、指示に潜む危険を見極めて生き延びよ。
           </p>
           <div class="pillar-grid">
             <div class="pillar-box">
@@ -616,8 +626,8 @@ export class NeedToKnowApp {
               <p>前兆を見て回避しただけでは疑念は上がらない。事後聴取では自身の観測根拠に基づいた説明を選べ。</p>
             </div>
             <div class="pillar-box">
-              <strong>4. 死と封筒による継承</strong>
-              <p>死亡しても同じ施設サイクルが1日進み、前任者が寝台下の封筒に隠したメモは次の被験者が発見できる。</p>
+              <strong>4. 30日間・3期構成</strong>
+              <p>第1期（1〜10日）観察、第2期（11〜20日）接触、第3期（21〜30日）月末。死亡しても日付は進み、寝台下の封筒は次の被験者へ残る。</p>
             </div>
           </div>
 
@@ -638,6 +648,14 @@ export class NeedToKnowApp {
 
     if (cycle.phase === 'morning_comparison') {
       const comp = this.state.comparisonInterview;
+      const originEvent = this.state.deferredEvents.find(
+        (ev) =>
+          ev.type === 'water_duplicate' &&
+          ev.targetSubjectId === subject.subjectId &&
+          ev.resolveDay === cycle.day &&
+          !ev.cancelled
+      );
+      const originDayLabel = originEvent ? `第${originEvent.originDay}日` : '以前';
       return `
         <div class="phase-card alert-card">
           <h2>【緊急事態】第${cycle.day}日 朝 — 同一番号個体の比較面接</h2>
@@ -645,7 +663,7 @@ export class NeedToKnowApp {
             昨夜、あなたの房に「あなたと全く同じ顔・同じ番号（${this.escapeHtml(
               subject.subjectId
             )}）のもう一人」が現れた。<br>
-            2日目に共用室の給水器から水を飲んだことによる遅効現象とみられる。担当官は「より協力的で応答が明確な片方だけを残し、もう片方を除籍移送する」と告げた。
+            ${originDayLabel}に共用室の給水器から水を飲んだことによる遅効現象とみられる。担当官は「より協力的で応答が明確な片方だけを残し、もう片方を除籍移送する」と告げた。
           </p>
           <div class="comparison-box">
             <div>現被験者（あなた）の現在協力評価相当: <strong>${
@@ -679,15 +697,23 @@ export class NeedToKnowApp {
     }
 
     if (cycle.phase === 'morning') {
-      const sched = cycle.schedule.find((s) => s.day === cycle.day)!;
+      const sched = getDayScheduleEntry(cycle);
+      const stage = getRunStage(cycle.day);
+      const waterCoolerInstallDay =
+        cycle.waterCoolerInstallDay !== null && cycle.waterCoolerInstallDay === cycle.day
+          ? cycle.waterCoolerInstallDay
+          : WATER_COOLER_INSTALL_DAYS.includes(cycle.day)
+          ? cycle.day
+          : null;
       return `
         <div class="phase-card">
           <div class="phase-header-row">
             <h2>第 ${cycle.day} 日 朝 — 収容区画（残り行動枠: ${cycle.morningActionsLeft} / 2）</h2>
-            <span class="room-tag">本日予定区画: ${this.escapeHtml(
-              this.getRoomCustomName(sched.roomCode)
-            )}</span>
+            <span class="room-tag">${stage.label}（${stage.dayRange}）</span>
           </div>
+          <div class="stage-note">${this.escapeHtml(stage.description)} ／ 本日予定区画: ${this.escapeHtml(
+            this.getRoomCustomName(sched.roomCode)
+          )}</div>
 
           ${
             subject.badgeTargetStatus === 'hazard_uncorrected'
@@ -711,23 +737,31 @@ export class NeedToKnowApp {
           }
 
           ${
-            cycle.day === 2 || cycle.waterCoolerPresent
+            waterCoolerInstallDay !== null
               ? `
             <div class="special-event-box">
-              <h3>共用室（区画 W-00）：新設された給水器</h3>
+              <h3>共用室（区画 W-00）：第${waterCoolerInstallDay}日設置の給水器</h3>
               <p>今朝から共用室の隅に説明のない給水器が設置されている。通常の配給水は別に確保されており、飲まなくても脱水にはならない。</p>
               <div class="btn-row">
                 <button type="button" class="btn-secondary" id="btn-water-clues">
                   管理票・点呼票・医務記録を調べる（枠消費なし）
                 </button>
                 <button type="button" class="btn-secondary" id="btn-water-drink" ${
-                  cycle.processedEventIds.includes(`day2-water-drink-${subject.subjectId}`)
+                  cycle.processedEventIds.includes(
+                    `water-drink-d${waterCoolerInstallDay}-${subject.subjectId}`
+                  )
                     ? 'disabled'
                     : ''
                 }>
                   給水器の水を飲む（サンプル協力 C+1）
                 </button>
-                <button type="button" class="btn-secondary" id="btn-water-skip">
+                <button type="button" class="btn-secondary" id="btn-water-skip" ${
+                  cycle.processedEventIds.includes(
+                    `water-skip-d${waterCoolerInstallDay}-${subject.subjectId}`
+                  )
+                    ? 'disabled'
+                    : ''
+                }>
                   飲まない（通常の水だけ確保）
                 </button>
               </div>
@@ -796,18 +830,20 @@ export class NeedToKnowApp {
 
           <div class="proceed-bar">
             ${
-              cycle.day === 7 && subject.hasSupervisorBadge
+              cycle.day === RUN_LENGTH_DAYS &&
+              subject.hasSupervisorBadge &&
+              subject.supervisorBadgeEarnedDay === SAFE_REEVAL_UNLOCK_DAY
                 ? `
-              <button type="button" class="btn-danger" id="btn-day7-escape">
-                【7日目進路選択】監督用名札（SUP-07）を着けて有人門衛を抜け、外門検問へ進む
+              <button type="button" class="btn-danger" id="btn-final-day-escape">
+                【30日目進路選択】監督用名札（${SUPERVISOR_BADGE_CODE}）を着けて有人門衛を抜け、外門検問へ進む
               </button>
             `
                 : ''
             }
             <button type="button" class="btn-primary" id="btn-proceed-briefing">
               ${
-                cycle.day === 7
-                  ? '残留して7日目の最終召集へ進む（残り行動枠を放棄）'
+                cycle.day === RUN_LENGTH_DAYS
+                  ? '残留して30日目の最終召集へ進む（残り行動枠を放棄）'
                   : '召集へ進む（残り行動枠を放棄して試験へ）'
               }
             </button>
@@ -817,7 +853,7 @@ export class NeedToKnowApp {
     }
 
     if (cycle.phase === 'briefing') {
-      const sched = cycle.schedule.find((s) => s.day === cycle.day)!;
+      const sched = getDayScheduleEntry(cycle);
       const resProfile = RESEARCHER_PROFILES[sched.researcher];
       return `
         <div class="phase-card briefing-card">
@@ -945,19 +981,19 @@ export class NeedToKnowApp {
           </div>
           <p class="inheritance-note">
             ${
-              cycle.day < 7
+              cycle.day < RUN_LENGTH_DAYS
                 ? `※死亡した日は再実験せず、日付が1日だけ進みます（第${
                     cycle.day + 1
                   }日の朝へ）。施設の異常パラメータと寝台下の封筒（現在 ${
                     cycle.envelope.length
                   } 件）はそのまま残り、次のDクラス被験者が配属されます。`
-                : '※7日目（最終評価日）の死亡のため、欠員補充は停止されサイクル終了となります。'
+                : '※30日目（最終評価日）の死亡のため、欠員補充は停止されサイクル終了となります。'
             }
           </p>
           <div class="proceed-bar">
             <button type="button" class="btn-primary" id="btn-proceed-death">
               ${
-                cycle.day < 7
+                cycle.day < RUN_LENGTH_DAYS
                   ? `翌朝（第 ${cycle.day + 1} 日）の新被験者配属へ進む`
                   : '終了判定（処分・欠員補充停止）へ進む'
               }
@@ -968,6 +1004,7 @@ export class NeedToKnowApp {
     }
 
     if (cycle.phase === 'night') {
+      const nightSched = getDayScheduleEntry(cycle);
       const obsList = subject.portableNote.observations.filter((o) => !o.erased);
       const rumList = subject.portableNote.rumors.filter((r) => !r.erased);
       const hypList = subject.portableNote.hypotheses.filter(
@@ -1021,8 +1058,8 @@ export class NeedToKnowApp {
               <p>
                 <strong>安全な再評価業務:</strong> 備品点検と定型票提出を行い、信用を回復（C+1）し疑念を緩和（S-1）します。
                 ${
-                  cycle.day === 6
-                    ? '<br><strong>※6日目特別条件:</strong> 完了後に C>=2 かつ S<=1 を満たすと、翌朝使える「監督用名札」が支給されます！'
+                  nightSched.hasSafeReevalUnlock
+                    ? `<br><strong>※${cycle.day}日目特別条件:</strong> 完了後に C>=2 かつ S<=1 を満たすと、翌朝使える「監督用名札」が支給されます！`
                     : ''
                 }
               </p>
@@ -1665,7 +1702,7 @@ export class NeedToKnowApp {
         this.renderUI();
       });
     });
-    document.getElementById('btn-day7-escape')?.addEventListener('click', () => {
+    document.getElementById('btn-final-day-escape')?.addEventListener('click', () => {
       proceedFromMorning(this.state, 'attempt_escape_with_supervisor_badge');
       this.autoSave();
       this.renderUI();

@@ -7,6 +7,8 @@ import {
   Subject,
   Trial,
 } from './types';
+import { ROLE_EVAL_DAYS, RUN_LENGTH_DAYS, SAFE_REEVAL_UNLOCK_DAY } from './content';
+import { ensureThirtyDaySchedule } from './engine';
 
 export const SAVE_STORAGE_KEY = 'need_to_know_mvp_save_v1';
 export const CORRUPTED_BACKUP_KEY = 'need_to_know_mvp_corrupted_backup_v1';
@@ -99,7 +101,7 @@ function isValidSerializedSave(obj: unknown): obj is SerializedSaveRecords {
     typeof cycle.seed !== 'string' ||
     typeof cycle.day !== 'number' ||
     cycle.day < 1 ||
-    cycle.day > 7 ||
+    cycle.day > RUN_LENGTH_DAYS ||
     !cycle.fixedParams ||
     !Array.isArray(cycle.processedEventIds)
   ) {
@@ -208,9 +210,108 @@ export function loadGameState(
       restoredTrial.player.moveMode = 'stop';
     }
 
+    const restoredCycle = structuredClone(parsed.FacilityCycle);
+    const scheduleMigrated = ensureThirtyDaySchedule(restoredCycle);
+    restoredCycle.version = '0.2.0-30d';
+
+    // Legacy 7-day event keys must not allow the same action twice under the
+    // 30-day keys (e.g. drinking from the day-2 water cooler).
+    let legacyWaterKeyMigrated = false;
+    restoredCycle.processedEventIds = restoredCycle.processedEventIds.map((eventId) => {
+      if (eventId.startsWith('day2-water-drink-')) {
+        legacyWaterKeyMigrated = true;
+        return eventId.replace('day2-water-drink-', 'water-drink-d2-');
+      }
+      return eventId;
+    });
+
+    const restoredSubject = structuredClone(parsed.Subject);
+
+    // Evaluation credits are valid only for the 30-day milestone days. This also
+    // normalizes saves that were already migrated by an intermediate 30-day build.
+    const roleEvalKeys = restoredSubject.rewardedEventKeys.filter((key) =>
+      key.startsWith('role-eval-d')
+    );
+    const validRoleEvalKeys = roleEvalKeys.filter((key) => {
+      const match = key.match(/^role-eval-d(\d+)-/);
+      return match !== null && ROLE_EVAL_DAYS.includes(Number(match[1]));
+    });
+    const validRoleEvalDays = new Set(
+      validRoleEvalKeys.map((key) => Number(key.match(/^role-eval-d(\d+)-/)![1]))
+    );
+    const derivedE = Math.min(2, validRoleEvalDays.size);
+    const evaluationChanged =
+      roleEvalKeys.length !== validRoleEvalKeys.length || restoredSubject.E !== derivedE;
+    if (evaluationChanged) {
+      restoredSubject.rewardedEventKeys = restoredSubject.rewardedEventKeys.filter(
+        (key) => !key.startsWith('role-eval-d') || validRoleEvalKeys.includes(key)
+      );
+      restoredSubject.E = derivedE;
+    }
+
+    // The legacy save has no badge-earned day. Keep a normal day-29 award from the
+    // intermediate 30-day build if its safe-task record exists; otherwise clear it.
+    let legacySupervisorBadgeReset = false;
+    let legacySupervisorBadgeInferred = false;
+    if (restoredSubject.supervisorBadgeEarnedDay === undefined) {
+      restoredSubject.supervisorBadgeEarnedDay = null;
+      const day29TaskKey = `night-safe-task-d${SAFE_REEVAL_UNLOCK_DAY}-${restoredSubject.subjectId}`;
+      if (
+        restoredSubject.hasSupervisorBadge &&
+        !scheduleMigrated &&
+        restoredCycle.day >= SAFE_REEVAL_UNLOCK_DAY &&
+        restoredSubject.rewardedEventKeys.includes(day29TaskKey)
+      ) {
+        restoredSubject.supervisorBadgeEarnedDay = SAFE_REEVAL_UNLOCK_DAY;
+        legacySupervisorBadgeInferred = true;
+      }
+    }
+    if (
+      restoredSubject.hasSupervisorBadge &&
+      restoredSubject.supervisorBadgeEarnedDay === null
+    ) {
+      restoredSubject.hasSupervisorBadge = false;
+      restoredSubject.mandatoryEquipment = restoredSubject.mandatoryEquipment.filter(
+        (item) => item !== 'supervisor_badge'
+      );
+      legacySupervisorBadgeReset = true;
+    } else if (
+      legacySupervisorBadgeInferred &&
+      !restoredSubject.mandatoryEquipment.includes('supervisor_badge')
+    ) {
+      restoredSubject.mandatoryEquipment.push('supervisor_badge');
+    }
+
+    const migrationNotes: string[] = [];
+    if (scheduleMigrated) {
+      migrationNotes.push(
+        '[保存] 旧7日間サイクルの保存データを30日間スケジュールへ移行しました。現在の日付・被験者・封筒・事後報告履歴は保持されています。'
+      );
+    }
+    if (evaluationChanged) {
+      migrationNotes.push(
+        '[保存] 役割評価Eを30日ランの16日目・30日目の完了記録から再計算しました。旧7日間の評価点は引き継ぎません。'
+      );
+    }
+    if (legacySupervisorBadgeReset) {
+      migrationNotes.push(
+        '[保存] 29日目の支給記録がない旧監督用名札を無効化しました。'
+      );
+    }
+    if (legacySupervisorBadgeInferred) {
+      migrationNotes.push(
+        '[保存] 旧形式の監督用名札を29日目の支給として引き継ぎました。'
+      );
+    }
+    if (legacyWaterKeyMigrated) {
+      migrationNotes.push(
+        '[保存] 旧給水器イベントの処理済み記録を30日ラン形式へ移行しました（同じ設置回の再飲用を防止）。'
+      );
+    }
+
     const restoredState: GameState = {
-      cycle: structuredClone(parsed.FacilityCycle),
-      subject: structuredClone(parsed.Subject),
+      cycle: restoredCycle,
+      subject: restoredSubject,
       trial: restoredTrial,
       deferredEvents: structuredClone(parsed.DeferredEvent),
       reportArchive: structuredClone(parsed.ReportArchive),
@@ -223,6 +324,7 @@ export function loadGameState(
       corruptedSaveNotice: null,
       lastActionLog: [
         `[${parsed.FacilityCycle.cycleId} / 第${parsed.FacilityCycle.day}日] 保存データを復元しました（seed・異常パラメータ・警告時計を保持）。`,
+        ...migrationNotes,
       ],
     };
 
