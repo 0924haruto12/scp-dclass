@@ -219,6 +219,15 @@ button:disabled {
   color: var(--accent-cyan);
 }
 
+.stage-note {
+  margin: -2px 0 12px;
+  padding: 7px 10px;
+  background: #0f1724;
+  border-left: 3px solid var(--accent-amber);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
 .dossier-stamp {
   display: inline-block;
   font-family: var(--font-mono);

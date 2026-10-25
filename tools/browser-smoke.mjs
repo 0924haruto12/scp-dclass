@@ -99,7 +99,9 @@ try {
 
   await click(/新規サイクル開始（初回固定Seed/);
   await page.getByText('第 1 日 朝').waitFor();
-  results.push('morning: day 1 rendered');
+  await page.getByText(/第 1 \/ 30 日/).waitFor();
+  await page.getByText(/第1期 観察/).first().waitFor();
+  results.push('morning: day 1 rendered in 30-day run');
 
   await click(/召集へ進む/);
   await click(/入室して実験を開始する/);
@@ -227,6 +229,43 @@ try {
   );
   await page.screenshot({ path: `${artifactsDir}/06-text-200.png`, fullPage: true });
   results.push('layout: no horizontal overflow at 200% text');
+
+  // Final-day UI: load a synthetic Day 30 save and confirm the escape branch is reachable.
+  const finalPage = await context.newPage();
+  track(finalPage);
+  await finalPage.goto(baseURL, { waitUntil: 'networkidle' });
+  await finalPage.evaluate((key) => {
+    const state = window.__NTK_APP__.getState();
+    state.cycle.day = 30;
+    state.cycle.phase = 'morning';
+    state.cycle.endingResult = null;
+    state.subject.hasSupervisorBadge = true;
+    state.subject.C = 2;
+    state.subject.S = 0;
+    localStorage.setItem(
+      key,
+      JSON.stringify({
+        schemaVersion: '1.0',
+        savedAt: new Date().toISOString(),
+        FacilityCycle: state.cycle,
+        Subject: state.subject,
+        Trial: null,
+        DeferredEvent: state.deferredEvents,
+        ReportArchive: state.reportArchive,
+        ComparisonInterview: null,
+        Settings: state.settings,
+      })
+    );
+  }, saveKey);
+  await finalPage.reload({ waitUntil: 'networkidle' });
+  await finalPage.getByText(/第 30 \/ 30 日/).waitFor();
+  await finalPage.getByText(/第3期 月末/).first().waitFor();
+  await finalPage.locator('#btn-final-day-escape').waitFor();
+  await finalPage.locator('#btn-final-day-escape').click();
+  await finalPage.getByRole('heading', { name: '終了分岐 1：脱走未遂' }).waitFor();
+  results.push('30-day: final-day escape button reaches the ending screen');
+  await finalPage.screenshot({ path: `${artifactsDir}/07-final-day-ending.png`, fullPage: true });
+  await finalPage.close();
 
   assert.equal(pageErrors.length, 0, `page errors: ${pageErrors.join(' | ')}`);
   assert.equal(failedRequests.length, 0, `failed requests: ${failedRequests.join(' | ')}`);

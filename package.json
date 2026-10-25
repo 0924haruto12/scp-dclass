@@ -2,7 +2,7 @@
   "name": "need-to-know",
   "version": "0.1.0",
   "private": true,
-  "description": "NEED TO KNOW - 説明されない実験に送り込まれ、観察と推理で生存手順を組み立てるサバイバルホラー MVP",
+  "description": "NEED TO KNOW - 説明されない実験に送り込まれ、観察と推理で30日間の生存手順を組み立てるサバイバルホラー",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:browser": "node tools/browser-smoke.mjs"
+    "test:browser": "node tools/browser-smoke.mjs",
+    "test:30day": "node tools/thirty-day-ui-smoke.mjs"
   },
   "devDependencies": {
     "typescript": "^5.6.3",

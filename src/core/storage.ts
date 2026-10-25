@@ -7,6 +7,8 @@ import {
   Subject,
   Trial,
 } from './types';
+import { RUN_LENGTH_DAYS } from './content';
+import { ensureThirtyDaySchedule } from './engine';
 
 export const SAVE_STORAGE_KEY = 'need_to_know_mvp_save_v1';
 export const CORRUPTED_BACKUP_KEY = 'need_to_know_mvp_corrupted_backup_v1';
@@ -99,7 +101,7 @@ function isValidSerializedSave(obj: unknown): obj is SerializedSaveRecords {
     typeof cycle.seed !== 'string' ||
     typeof cycle.day !== 'number' ||
     cycle.day < 1 ||
-    cycle.day > 7 ||
+    cycle.day > RUN_LENGTH_DAYS ||
     !cycle.fixedParams ||
     !Array.isArray(cycle.processedEventIds)
   ) {
@@ -208,8 +210,12 @@ export function loadGameState(
       restoredTrial.player.moveMode = 'stop';
     }
 
+    const restoredCycle = structuredClone(parsed.FacilityCycle);
+    const scheduleMigrated = ensureThirtyDaySchedule(restoredCycle);
+    restoredCycle.version = '0.2.0-30d';
+
     const restoredState: GameState = {
-      cycle: structuredClone(parsed.FacilityCycle),
+      cycle: restoredCycle,
       subject: structuredClone(parsed.Subject),
       trial: restoredTrial,
       deferredEvents: structuredClone(parsed.DeferredEvent),
@@ -223,6 +229,11 @@ export function loadGameState(
       corruptedSaveNotice: null,
       lastActionLog: [
         `[${parsed.FacilityCycle.cycleId} / 第${parsed.FacilityCycle.day}日] 保存データを復元しました（seed・異常パラメータ・警告時計を保持）。`,
+        ...(scheduleMigrated
+          ? [
+              '[保存] 旧7日間サイクルの保存データを30日間スケジュールへ移行しました。現在の日付・被験者・封筒・事後報告履歴は保持されています。',
+            ]
+          : []),
       ],
     };
 

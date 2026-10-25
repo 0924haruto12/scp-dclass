@@ -3,7 +3,10 @@ import {
   CANONICAL_EVIDENCE,
   ENDING_DESCRIPTIONS,
   getDebriefChoices,
-  SEVEN_DAY_SCHEDULE,
+  RUN_LENGTH_DAYS,
+  SUPERVISOR_BADGE_CODE,
+  THIRTY_DAY_SCHEDULE,
+  WATER_COOLER_INSTALL_DAYS,
 } from './content';
 import { deriveFixedAnomalyParams, INITIAL_FIXED_SEED } from './rng';
 import {
@@ -13,6 +16,7 @@ import {
 } from './trials';
 import {
   ComparisonInterviewState,
+  DayScheduleEntry,
   DeferredEvent,
   EndingType,
   EnvelopeItem,
@@ -138,16 +142,17 @@ export function createInitialGameState(
     cycleId,
     seed,
     isPracticeFixedMode,
-    version: '0.1.0',
+    version: '0.2.0-30d',
     day: 1,
     phase: 'morning',
     morningActionsLeft: 2,
     nightActionsLeft: 2,
     fixedParams,
-    schedule: SEVEN_DAY_SCHEDULE.map((s) => ({ ...s })),
+    schedule: THIRTY_DAY_SCHEDULE.map((s) => ({ ...s })),
     envelope: [],
     envelopeOpenedToday: false,
     waterCoolerPresent: false,
+    waterCoolerInstallDay: null,
     processedEventIds: [],
     endingResult: null,
   };
@@ -168,9 +173,52 @@ export function createInitialGameState(
     },
     corruptedSaveNotice: null,
     lastActionLog: [
-      `[${cycleId} / 第1日 朝] 収容区画へ配属された。被験者番号：${subject.subjectId}。交付文書によると7日後に区画の定期評価と除籍処理が実施される。`,
+      `[${cycleId} / 第1日 朝] 収容区画へ配属された。被験者番号：${subject.subjectId}。交付文書によると30日後に区画の定期評価と除籍処理が実施される。`,
     ],
   };
+}
+
+/**
+ * Repairs a cycle created by the former 7-day prototype so that the rest of the
+ * 30-day schedule is available after loading an older save.
+ * Returns true when the schedule was replaced.
+ */
+export function ensureThirtyDaySchedule(cycle: FacilityCycle): boolean {
+  const needsRepair =
+    !Array.isArray(cycle.schedule) ||
+    cycle.schedule.length !== RUN_LENGTH_DAYS ||
+    !cycle.schedule.some((entry) => entry.day === RUN_LENGTH_DAYS);
+  if (needsRepair) {
+    cycle.schedule = THIRTY_DAY_SCHEDULE.map((entry) => ({ ...entry }));
+  }
+  if (cycle.waterCoolerInstallDay === undefined) {
+    cycle.waterCoolerInstallDay =
+      cycle.waterCoolerPresent && WATER_COOLER_INSTALL_DAYS.includes(cycle.day)
+        ? cycle.day
+        : null;
+  }
+  return needsRepair;
+}
+
+/** Returns the assignment for the current day, repairing a truncated schedule if needed. */
+export function getDayScheduleEntry(cycle: FacilityCycle): DayScheduleEntry {
+  ensureThirtyDaySchedule(cycle);
+  const safeDay = Math.min(Math.max(1, cycle.day), RUN_LENGTH_DAYS);
+  return (
+    cycle.schedule.find((entry) => entry.day === safeDay) ??
+    THIRTY_DAY_SCHEDULE[safeDay - 1] ??
+    THIRTY_DAY_SCHEDULE[0]
+  );
+}
+
+/**
+ * Applies day-dependent setup. The water cooler is installed on a small number of
+ * mornings per cycle; each placement creates its own delayed event.
+ */
+export function prepareFacilityDay(cycle: FacilityCycle): void {
+  const sched = getDayScheduleEntry(cycle);
+  cycle.waterCoolerPresent = Boolean(sched.hasWaterCoolerSetup);
+  cycle.waterCoolerInstallDay = cycle.waterCoolerPresent ? cycle.day : null;
 }
 
 /**
@@ -183,8 +231,8 @@ export function startNewCycle(
   newSeed?: string,
   isPracticeFixedMode = false
 ): GameState {
-  const nextCycleNum =
-    parseInt(prevState.cycle.cycleId.replace(/\D+/g, ''), 10) + 1 || 2;
+  const cycleNumberMatch = prevState.cycle.cycleId.match(/-C(\d+)$/);
+  const nextCycleNum = (cycleNumberMatch ? parseInt(cycleNumberMatch[1], 10) : 1) + 1;
   const effectiveSeed = isPracticeFixedMode
     ? INITIAL_FIXED_SEED
     : newSeed || `CYCLE-${nextCycleNum}-${Date.now()}`;
@@ -389,7 +437,14 @@ export function interactWaterCoolerInMorning(
   action: 'inspect_clues' | 'drink' | 'skip'
 ): string {
   const { cycle, subject } = state;
-  if (cycle.day !== 2 && !cycle.waterCoolerPresent) {
+  const installDay =
+    cycle.waterCoolerInstallDay !== null && cycle.waterCoolerInstallDay === cycle.day
+      ? cycle.waterCoolerInstallDay
+      : WATER_COOLER_INSTALL_DAYS.includes(cycle.day)
+      ? cycle.day
+      : null;
+
+  if (installDay === null) {
     return '現在、給水器の特別イベントはありません。';
   }
 
@@ -402,26 +457,24 @@ export function interactWaterCoolerInMorning(
   }
 
   if (action === 'drink') {
-    const eventKey = `day2-water-drink-${subject.subjectId}`;
+    const eventKey = `water-drink-d${installDay}-${subject.subjectId}`;
     if (cycle.processedEventIds.includes(eventKey)) {
       return '既に給水器の水を飲んでいます。';
     }
     cycle.processedEventIds.push(eventKey);
 
-    // Grants C+1 once as sample cooperation
+    // Grants C+1 once per placement as sample cooperation
     applySubjectDeltas(subject, 1, 0, 0);
 
-    const resolveDay = 2 + cycle.fixedParams.waterCoolerDelayDays; // Day 4 or Day 5 night -> Morning 5 or Morning 6 comparison
-    const comparisonMorningDay = resolveDay + 1; // Wait: let's check Section 7.C exact wording!
-    // Section 7.C: "発現まで2日または3日。2日目に飲むと4日目または5日目の夜に現れ、5日目または6日目の朝に比較する。3日は初回固定seedとする。"
-    const nightAppearDay = 2 + cycle.fixedParams.waterCoolerDelayDays; // 4 or 5
-    const morningCompareDay = nightAppearDay + 1; // 5 or 6
+    // 発現まで2〜3日。設置日の夜から数えて delay 日後の夜に現れ、翌朝に比較する。
+    const nightAppearDay = installDay + cycle.fixedParams.waterCoolerDelayDays;
+    const morningCompareDay = nightAppearDay + 1;
 
     const defEvent: DeferredEvent = {
-      id: `def-water-${subject.subjectId}-d${cycle.day}`,
+      id: `def-water-${subject.subjectId}-d${installDay}`,
       type: 'water_duplicate',
       targetSubjectId: subject.subjectId,
-      originDay: 2,
+      originDay: installDay,
       resolveDay: morningCompareDay,
       resolvePhase: 'morning_comparison',
       cancelOnSubjectDeath: true,
@@ -435,13 +488,18 @@ export function interactWaterCoolerInMorning(
     return msg;
   }
 
+  const skipKey = `water-skip-d${installDay}-${subject.subjectId}`;
+  if (cycle.processedEventIds.includes(skipKey)) {
+    return '本日の給水器の判断は既に記録済みです。';
+  }
+  cycle.processedEventIds.push(skipKey);
   const msg = '給水器の水には手をつけず、通常の配給水のみを確保した（脱水等の不利益なし）。';
   state.lastActionLog.push(msg);
   return msg;
 }
 
 /**
- * Resolves the Water Cooler Duplicate Comparison Interview on Morning 5 or 6 (Section 7.C, AC11).
+ * Resolves the Water Cooler Duplicate Comparison Interview on the scheduled morning (Section 7.C, AC11).
  */
 export function handleComparisonInterviewAction(
   state: GameState,
@@ -453,6 +511,17 @@ export function handleComparisonInterviewAction(
   }
 
   const { subject, cycle } = state;
+  const currentWaterEvent = state.deferredEvents.find(
+    (ev) =>
+      ev.type === 'water_duplicate' &&
+      ev.targetSubjectId === subject.subjectId &&
+      ev.resolveDay === cycle.day &&
+      !ev.resolved &&
+      !ev.cancelled
+  );
+  const originDay =
+    currentWaterEvent?.originDay ??
+    Math.max(1, cycle.day - (cycle.fixedParams.waterCoolerDelayDays + 1));
 
   if (choice === 'cooperate_answer') {
     // Safe cooperation task grants C+1 once so even C=0 reaches C=1 and survives!
@@ -465,15 +534,19 @@ export function handleComparisonInterviewAction(
     comp.active = false;
     comp.resolved = true;
 
-    // Mark deferred event resolved
+    // Mark the event that resolved this morning as resolved
     for (const ev of state.deferredEvents) {
-      if (ev.type === 'water_duplicate' && ev.targetSubjectId === subject.subjectId) {
+      if (
+        ev.type === 'water_duplicate' &&
+        ev.targetSubjectId === subject.subjectId &&
+        ev.resolveDay === cycle.day
+      ) {
         ev.resolved = true;
       }
     }
 
     cycle.phase = 'morning';
-    const msg = `【比較面接解決】自身の登録番号（${subject.originalNumber}）と協力記録を明確に応答した（信用 C+1 → 現在 C=${subject.C}）。複製個体（信用相当値 1）との比較の結果、同値以上につき現被験者 ${subject.subjectId} の残留が決定し、もう一人は搬出された。`;
+    const msg = `【比較面接解決】第${originDay}日に飲んだ給水器の遅効現象。自身の登録番号（${subject.originalNumber}）と協力記録を明確に応答した（信用 C+1 → 現在 C=${subject.C}）。複製個体（信用相当値 1）との比較の結果、同値以上につき現被験者 ${subject.subjectId} の残留が決定し、もう一人は搬出された。`;
     state.lastActionLog.push(msg);
     return msg;
   }
@@ -490,7 +563,11 @@ export function handleComparisonInterviewAction(
   comp.active = false;
   comp.resolved = true;
   for (const ev of state.deferredEvents) {
-    if (ev.type === 'water_duplicate' && ev.targetSubjectId === subject.subjectId) {
+    if (
+      ev.type === 'water_duplicate' &&
+      ev.targetSubjectId === subject.subjectId &&
+      ev.resolveDay === cycle.day
+    ) {
       ev.resolved = true;
     }
   }
@@ -507,7 +584,7 @@ export function handleComparisonInterviewAction(
     state,
     'W-00',
     'dead',
-    `第${cycle.day}日朝、同一番号の2名に対する比較面接を実施。協力記録および応答の優位性に基づき片方を残し、被験者 ${subject.subjectId} を移送除籍。`
+    `第${cycle.day}日朝、第${originDay}日設置の給水器に起因する同一番号の2名に対する比較面接を実施。協力記録および応答の優位性に基づき片方を残し、被験者 ${subject.subjectId} を移送除籍。`
   );
   cycle.phase = 'death_report';
   const msg = `比較面接で無応答を確定したため、より協力的と判定された複製個体が残され、被験者 ${subject.subjectId} は除籍移送された。`;
@@ -552,21 +629,21 @@ export function updateHypothesis(
 }
 
 /**
- * Proceeds from Morning to Briefing (召集) or Day 7 Escape Attempt (Section 2.2, Section 8.2).
+ * Proceeds from Morning to Briefing (召集) or the Day 30 escape attempt (Section 2.2, Section 8.2).
  */
 export function proceedFromMorning(
   state: GameState,
-  day7Choice: 'normal_duty' | 'attempt_escape_with_supervisor_badge' = 'normal_duty'
+  finalDayChoice: 'normal_duty' | 'attempt_escape_with_supervisor_badge' = 'normal_duty'
 ): string {
   const { cycle, subject } = state;
 
-  // Priority 1 on Day 7 Morning: Escape Attempt with Supervisor Badge
+  // Priority 1 on the final morning: escape attempt with the supervisor badge
   if (
-    cycle.day === 7 &&
-    day7Choice === 'attempt_escape_with_supervisor_badge' &&
+    cycle.day === RUN_LENGTH_DAYS &&
+    finalDayChoice === 'attempt_escape_with_supervisor_badge' &&
     subject.hasSupervisorBadge
   ) {
-    subject.displayedBadgeNumber = 'SUP-07';
+    subject.displayedBadgeNumber = SUPERVISOR_BADGE_CODE;
     cycle.endingResult = 'escape_attempt';
     cycle.phase = 'ending';
     recordReportArchiveEntry(
@@ -577,14 +654,14 @@ export function proceedFromMorning(
       'escape_attempt'
     );
     const msg =
-      '7日目の朝、監督用名札を着用して収容区画の有人検問を通過し、外門の生体認証ゲートまで到達した！（終了分岐：脱走未遂）';
+      '30日目の朝、監督用名札を着用して収容区画の有人検問を通過し、外門の生体認証ゲートまで到達した！（終了分岐：脱走未遂）';
     state.lastActionLog.push(msg);
     return msg;
   }
 
   // If subject still has uncorrected badge hazard assignment on morning of Trial, prompt re-verification opportunity
   cycle.phase = 'briefing';
-  const sched = cycle.schedule.find((s) => s.day === cycle.day)!;
+  const sched = getDayScheduleEntry(cycle);
   const msg = `【第${cycle.day}日 召集】番号「${subject.displayedBadgeNumber}」が呼ばれた。通達されたのは試験室コード「${sched.roomCode}」と作業区分「${sched.briefingWord}」の一語のみ。`;
   state.lastActionLog.push(msg);
   return msg;
@@ -595,7 +672,7 @@ export function proceedFromMorning(
  */
 export function startCurrentDayTrial(state: GameState): Trial {
   const { cycle, subject } = state;
-  const sched = cycle.schedule.find((s) => s.day === cycle.day)!;
+  const sched = getDayScheduleEntry(cycle);
   const trial = createTrial(
     cycle.day,
     sched.roomCode,
@@ -688,7 +765,7 @@ export function concludeTrialPhase(state: GameState): string {
   }
   cycle.processedEventIds.push(concludeKey);
 
-  const sched = cycle.schedule.find((s) => s.day === cycle.day)!;
+  const sched = getDayScheduleEntry(cycle);
   const fragment = buildTrialReportFragment(state);
 
   if (trial.status === 'dead') {
@@ -832,8 +909,8 @@ export function submitDebriefResponse(
     applyMemoryTreatment(state);
   }
 
-  // On Day 7, after debrief, proceed directly to Final Evaluation!
-  if (cycle.day === 7) {
+  // On the final day, after debrief, proceed directly to Final Evaluation!
+  if (cycle.day >= RUN_LENGTH_DAYS) {
     return evaluateFinalDayOutcome(state);
   }
 
@@ -844,9 +921,9 @@ export function submitDebriefResponse(
 
 /**
  * Handles advancing from Death Report (Section 2.2, AC01, AC02, AC14):
- * - On Days 1..6: advances day by 1, skips same-day debrief & night, spawns new Subject with C/S/E=0,
+ * - On Days 1..29: advances day by 1, skips same-day debrief & night, spawns new Subject with C/S/E=0,
  *   cancels deceased subject's water_duplicate event, preserves cycle fixedParams & envelope.
- * - On Day 7: triggers Ending 2 ('termination_shortage' / 処分・欠員補充停止).
+ * - On Day 30: triggers Ending 2 ('termination_shortage' / 処分・欠員補充停止).
  */
 export function proceedFromDeathReport(state: GameState): string {
   const { cycle, subject } = state;
@@ -861,8 +938,8 @@ export function proceedFromDeathReport(state: GameState): string {
     }
   }
 
-  // Priority 2 on Day 7: Death on Day 7 ends cycle with 'termination_shortage'
-  if (cycle.day >= 7) {
+  // Priority 2 on the final day: death on Day 30 ends the cycle with 'termination_shortage'
+  if (cycle.day >= RUN_LENGTH_DAYS) {
     cycle.endingResult = 'termination_shortage';
     cycle.phase = 'ending';
     recordReportArchiveEntry(
@@ -873,12 +950,12 @@ export function proceedFromDeathReport(state: GameState): string {
       'termination_shortage'
     );
     const msg =
-      '7日目に現被験者が死亡したため、終了判定表（優先2）に基づき「処分・欠員補充停止」でサイクル終了。';
+      '30日目に現被験者が死亡したため、終了判定表（優先2）に基づき「処分・欠員補充停止」でサイクル終了。';
     state.lastActionLog.push(msg);
     return msg;
   }
 
-  // Days 1..6: Advance facility day by +1, replace Subject
+  // Days 1..29: Advance facility day by +1, replace Subject
   const prevIdNum = parseInt(subject.subjectId.replace(/\D+/g, ''), 10) || 4821;
   const newSubject = createNewSubject(prevIdNum + 1);
   state.subject = newSubject;
@@ -888,9 +965,7 @@ export function proceedFromDeathReport(state: GameState): string {
   cycle.morningActionsLeft = 2;
   cycle.nightActionsLeft = 2;
   cycle.envelopeOpenedToday = false;
-  if (cycle.day === 2) {
-    cycle.waterCoolerPresent = true;
-  }
+  prepareFacilityDay(cycle);
   cycle.phase = 'morning';
 
   const msg = `【第${cycle.day}日 朝・被験者交代】前任者（${subject.subjectId}）の除籍に伴い、新規被験者「${newSubject.subjectId}」が同収容房へ配属された（施設の異常パラメータと寝台下の封筒は保持、個人のC/S/Eおよび予約イベントは初期化）。`;
@@ -941,7 +1016,8 @@ export function copyItemsToEnvelopeAtNight(
 /**
  * Night Action: Safe Re-evaluation Task (安全な再評価業務, Section 5.1 & Section 8.1, AC08):
  * Takes 1 Night Action Slot, grants C+1 and S-1 once per night.
- * On Day 6 only, if post-completion values satisfy C >= 2 && S <= 1, awards Supervisor Badge (監督用名札).
+ * On the night marked as the unlock day (29th), if post-completion values satisfy
+ * C >= 2 && S <= 1, awards the Supervisor Badge (監督用名札).
  */
 export function performSafeReevaluationTaskAtNight(state: GameState): string {
   const { cycle, subject } = state;
@@ -961,14 +1037,14 @@ export function performSafeReevaluationTaskAtNight(state: GameState): string {
   subject.rewardedEventKeys.push(taskKey);
   applySubjectDeltas(subject, 1, -1, 0);
 
+  const sched = getDayScheduleEntry(cycle);
   let badgeMsg = '';
-  if (cycle.day === 6 && subject.C >= 2 && subject.S <= 1) {
+  if (sched.hasSafeReevalUnlock && subject.C >= 2 && subject.S <= 1) {
     subject.hasSupervisorBadge = true;
     if (!subject.mandatoryEquipment.includes('supervisor_badge')) {
       subject.mandatoryEquipment.push('supervisor_badge');
     }
-    badgeMsg =
-      ' 【特別支給】6日目の評価基準（C>=2 かつ S<=1）を満たしたため、翌朝の区画移動用として「監督用名札（SUP-07）」が交付された！';
+    badgeMsg = ` 【特別支給】${cycle.day}日目の評価基準（C>=2 かつ S<=1）を満たしたため、翌朝の区画移動用として「監督用名札（${SUPERVISOR_BADGE_CODE}）」が交付された！`;
   }
 
   const msg = `夜の行動（1枠消費）：安全な再評価業務（備品点検・定型質問票の提出）を完了した（信用 C+1、疑念 S-1 → 現在 C=${subject.C}, S=${subject.S}）。${badgeMsg}`;
@@ -977,7 +1053,7 @@ export function performSafeReevaluationTaskAtNight(state: GameState): string {
 }
 
 /**
- * Advances from Night to the next Morning (Days 1..6) or Final Evaluation (Day 7).
+ * Advances from Night to the next Morning (Days 1..29) or Final Evaluation (Day 30).
  */
 export function proceedFromNightToNextDay(state: GameState): string {
   const { cycle, subject } = state;
@@ -990,7 +1066,7 @@ export function proceedFromNightToNextDay(state: GameState): string {
     applyMemoryTreatment(state);
   }
 
-  if (cycle.day >= 7) {
+  if (cycle.day >= RUN_LENGTH_DAYS) {
     return evaluateFinalDayOutcome(state);
   }
 
@@ -999,17 +1075,14 @@ export function proceedFromNightToNextDay(state: GameState): string {
   cycle.nightActionsLeft = 2;
   cycle.envelopeOpenedToday = false;
   state.trial = null;
-
-  if (cycle.day === 2) {
-    cycle.waterCoolerPresent = true;
-  }
+  prepareFacilityDay(cycle);
 
   // Badge effect expires at morning roll call of the day after wearing, leaving hazard_uncorrected if not reverified
   if (subject.badgeEffectUntilDay !== null && cycle.day >= subject.badgeEffectUntilDay) {
     subject.badgeEffectUntilDay = null;
   }
 
-  // Check if a Water Cooler Duplicate event is scheduled for this morning (Day 5 or Day 6)
+  // Check if a Water Cooler Duplicate event is scheduled for this morning
   const pendingDuplicate = state.deferredEvents.find(
     (ev) =>
       ev.type === 'water_duplicate' &&
@@ -1028,7 +1101,7 @@ export function proceedFromNightToNextDay(state: GameState): string {
       silentWarningShown: false,
       resolved: false,
     };
-    const msg = `【第${cycle.day}日 朝・緊急比較面接】昨夜、収容房に「あなたと全く同じ姿・同じ番号（${subject.subjectId}）のもう一人」が現れた。通常の朝の行動に入る前に、担当官による比較面接（応答と協力記録の照合）が実施される！`;
+    const msg = `【第${cycle.day}日 朝・緊急比較面接】第${pendingDuplicate.originDay}日に飲んだ給水器の遅効現象により、昨夜、収容房に「あなたと全く同じ姿・同じ番号（${subject.subjectId}）のもう一人」が現れた。通常の朝の行動に入る前に、担当官による比較面接（応答と協力記録の照合）が実施される！`;
     state.lastActionLog.push(msg);
     return msg;
   }
@@ -1040,16 +1113,20 @@ export function proceedFromNightToNextDay(state: GameState): string {
 }
 
 /**
- * Evaluates the Day 7 Ending according to the strict priority table in Section 8.2 (AC14):
- * Priority 1: Day 7 Morning Escape Attempt with Supervisor Badge -> 'escape_attempt'
- * Priority 2: Day 7 Current Subject Death -> 'termination_shortage'
+ * Evaluates the Day 30 ending according to the strict priority table in Section 8.2 (AC14):
+ * Priority 1: Final Morning Escape Attempt with Supervisor Badge -> 'escape_attempt'
+ * Priority 2: Current Subject Death on the final day -> 'termination_shortage'
  * Priority 3: Survived final trial AND E === 2 && C >= 2 && S <= 1 -> 'certified_useful'
- * Priority 4: Any other Day 7 completion -> 'termination_standard'
+ * Priority 4: Any other final-day completion -> 'termination_standard'
  */
 export function evaluateFinalDayOutcome(
   state: GameState,
   overrides?: {
+    attemptedEscapeOnFinalDay?: boolean;
+    diedOnFinalDay?: boolean;
+    /** @deprecated 7日MVP互換。 */
     attemptedEscapeOnDay7Morning?: boolean;
+    /** @deprecated 7日MVP互換。 */
     diedOnDay7?: boolean;
   }
 ): string {
@@ -1057,9 +1134,13 @@ export function evaluateFinalDayOutcome(
 
   let chosenEnding: EndingType;
 
-  if (overrides?.attemptedEscapeOnDay7Morning) {
+  if (overrides?.attemptedEscapeOnFinalDay || overrides?.attemptedEscapeOnDay7Morning) {
     chosenEnding = 'escape_attempt';
-  } else if (overrides?.diedOnDay7 || state.trial?.status === 'dead') {
+  } else if (
+    overrides?.diedOnFinalDay ||
+    overrides?.diedOnDay7 ||
+    state.trial?.status === 'dead'
+  ) {
     chosenEnding = 'termination_shortage';
   } else if (
     state.trial?.status === 'survived' &&
