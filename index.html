@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>NEED TO KNOW — 歩調 縦切り</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="assets/styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header id="topbar">
+        <div class="brand">
+          NEED TO KNOW
+          <span class="brand-sub">prototype 0.1</span>
+        </div>
+        <div id="meta" class="meta"></div>
+      </header>
+
+      <div id="banner" class="banner" hidden></div>
+
+      <main id="stage">
+        <section id="screen" class="screen" aria-live="polite"></section>
+
+        <section id="play" class="play" hidden>
+          <canvas id="canvas" width="960" height="540"></canvas>
+          <div id="hud">
+            <div id="hud-day" class="hud-item"></div>
+            <div id="hud-clock" class="hud-item clock"></div>
+            <div id="hud-carry" class="hud-item"></div>
+          </div>
+          <div class="play-hint">WASD 移動 / Shift 走行 / C 低速 / E 調べる / Tab ノート</div>
+          <div id="prompt" class="prompt" hidden></div>
+          <div id="caption" class="caption" aria-live="polite"></div>
+        </section>
+      </main>
+
+      <div id="modal" class="modal" hidden></div>
+
+      <footer id="footer">
+        <span class="foot-note">試作 / 距離・秒数・閾値は初期値であり実測値ではない</span>
+        <div class="foot-actions">
+          <button type="button" class="link-button" data-action="open-notebook">ノート <kbd>Tab</kbd></button>
+          <button type="button" class="link-button" data-action="open-settings">設定</button>
+        </div>
+      </footer>
+    </div>
+
+    <script type="module" src="src/app/main.js"></script>
+  </body>
+</html>
