@@ -129,6 +129,7 @@ export interface Subject {
   badgeEverWornThisTrial: boolean;
   badgeTargetStatus: 'none' | 'hazard_uncorrected' | 'hazard_corrected' | 'ration_priority';
   hasSupervisorBadge: boolean;
+  supervisorBadgeEarnedDay: number | null;
   C: number; // 0..3 Compliance (信用)
   S: number; // 0..3 Suspicion (疑念)
   E: number; // 0..2 Role Evaluation (役割評価)

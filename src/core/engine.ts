@@ -4,6 +4,7 @@ import {
   ENDING_DESCRIPTIONS,
   getDebriefChoices,
   RUN_LENGTH_DAYS,
+  SAFE_REEVAL_UNLOCK_DAY,
   SUPERVISOR_BADGE_CODE,
   THIRTY_DAY_SCHEDULE,
   WATER_COOLER_INSTALL_DAYS,
@@ -61,6 +62,7 @@ export function createNewSubject(subjectNumberInt: number): Subject {
     badgeEverWornThisTrial: false,
     badgeTargetStatus: 'none',
     hasSupervisorBadge: false,
+    supervisorBadgeEarnedDay: null,
     C: 0,
     S: 0,
     E: 0,
@@ -524,11 +526,15 @@ export function handleComparisonInterviewAction(
     Math.max(1, cycle.day - (cycle.fixedParams.waterCoolerDelayDays + 1));
 
   if (choice === 'cooperate_answer') {
-    // Safe cooperation task grants C+1 once so even C=0 reaches C=1 and survives!
-    const rewardKey = `water_comp_coop_${subject.subjectId}`;
+    // Safe cooperation task grants C+1 once per comparison event so even C=0
+    // reaches C=1 and survives. Recurring water-cooler placements each get their own credit.
+    const comparisonKey = currentWaterEvent?.id ?? `d${originDay}`;
+    const rewardKey = `water_comp_coop_${comparisonKey}_${subject.subjectId}`;
+    let grantedCompliance = false;
     if (!subject.rewardedEventKeys.includes(rewardKey)) {
       subject.rewardedEventKeys.push(rewardKey);
       applySubjectDeltas(subject, 1, 0, 0);
+      grantedCompliance = true;
     }
     comp.cooperationAnswered = true;
     comp.active = false;
@@ -546,7 +552,10 @@ export function handleComparisonInterviewAction(
     }
 
     cycle.phase = 'morning';
-    const msg = `【比較面接解決】第${originDay}日に飲んだ給水器の遅効現象。自身の登録番号（${subject.originalNumber}）と協力記録を明確に応答した（信用 C+1 → 現在 C=${subject.C}）。複製個体（信用相当値 1）との比較の結果、同値以上につき現被験者 ${subject.subjectId} の残留が決定し、もう一人は搬出された。`;
+    const cooperationNote = grantedCompliance
+      ? `安全協力課題により C+1 → 現在 C=${subject.C}`
+      : `本日の協力課題は処理済み（現在 C=${subject.C}）`;
+    const msg = `【比較面接解決】第${originDay}日に飲んだ給水器の遅効現象。自身の登録番号（${subject.originalNumber}）と協力記録を明確に応答した（${cooperationNote}）。複製個体（信用相当値 1）との比較の結果、同値以上につき現被験者 ${subject.subjectId} の残留が決定し、もう一人は搬出された。`;
     state.lastActionLog.push(msg);
     return msg;
   }
@@ -641,7 +650,8 @@ export function proceedFromMorning(
   if (
     cycle.day === RUN_LENGTH_DAYS &&
     finalDayChoice === 'attempt_escape_with_supervisor_badge' &&
-    subject.hasSupervisorBadge
+    subject.hasSupervisorBadge &&
+    subject.supervisorBadgeEarnedDay === SAFE_REEVAL_UNLOCK_DAY
   ) {
     subject.displayedBadgeNumber = SUPERVISOR_BADGE_CODE;
     cycle.endingResult = 'escape_attempt';
@@ -1041,6 +1051,7 @@ export function performSafeReevaluationTaskAtNight(state: GameState): string {
   let badgeMsg = '';
   if (sched.hasSafeReevalUnlock && subject.C >= 2 && subject.S <= 1) {
     subject.hasSupervisorBadge = true;
+    subject.supervisorBadgeEarnedDay = cycle.day;
     if (!subject.mandatoryEquipment.includes('supervisor_badge')) {
       subject.mandatoryEquipment.push('supervisor_badge');
     }

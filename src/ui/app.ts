@@ -8,6 +8,7 @@ import {
   ORIENTATION_DOCUMENT,
   RESEARCHER_PROFILES,
   RUN_LENGTH_DAYS,
+  SAFE_REEVAL_UNLOCK_DAY,
   SUPERVISOR_BADGE_CODE,
   WATER_COOLER_INSTALL_DAYS,
 } from '../core/content';
@@ -829,7 +830,9 @@ export class NeedToKnowApp {
 
           <div class="proceed-bar">
             ${
-              cycle.day === RUN_LENGTH_DAYS && subject.hasSupervisorBadge
+              cycle.day === RUN_LENGTH_DAYS &&
+              subject.hasSupervisorBadge &&
+              subject.supervisorBadgeEarnedDay === SAFE_REEVAL_UNLOCK_DAY
                 ? `
               <button type="button" class="btn-danger" id="btn-final-day-escape">
                 【30日目進路選択】監督用名札（${SUPERVISOR_BADGE_CODE}）を着けて有人門衛を抜け、外門検問へ進む

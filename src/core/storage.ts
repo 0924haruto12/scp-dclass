@@ -214,9 +214,68 @@ export function loadGameState(
     const scheduleMigrated = ensureThirtyDaySchedule(restoredCycle);
     restoredCycle.version = '0.2.0-30d';
 
+    // Legacy 7-day event keys must not allow the same action twice under the
+    // 30-day keys (e.g. drinking from the day-2 water cooler).
+    let legacyWaterKeyMigrated = false;
+    restoredCycle.processedEventIds = restoredCycle.processedEventIds.map((eventId) => {
+      if (eventId.startsWith('day2-water-drink-')) {
+        legacyWaterKeyMigrated = true;
+        return eventId.replace('day2-water-drink-', 'water-drink-d2-');
+      }
+      return eventId;
+    });
+
+    const restoredSubject = structuredClone(parsed.Subject);
+    if (restoredSubject.supervisorBadgeEarnedDay === undefined) {
+      restoredSubject.supervisorBadgeEarnedDay = null;
+    }
+
+    // Evaluation credits and the supervisor badge earned in the former 7-day
+    // cycle are not valid for the 30-day certification / escape milestones.
+    let legacyProgressReset = false;
+    if (scheduleMigrated) {
+      const hadLegacyEvaluation =
+        restoredSubject.E > 0 ||
+        restoredSubject.rewardedEventKeys.some((key) => key.startsWith('role-eval-d'));
+      if (hadLegacyEvaluation) {
+        restoredSubject.E = 0;
+        restoredSubject.rewardedEventKeys = restoredSubject.rewardedEventKeys.filter(
+          (key) => !key.startsWith('role-eval-d')
+        );
+        legacyProgressReset = true;
+      }
+    }
+    if (
+      restoredSubject.hasSupervisorBadge &&
+      restoredSubject.supervisorBadgeEarnedDay === null
+    ) {
+      restoredSubject.hasSupervisorBadge = false;
+      restoredSubject.mandatoryEquipment = restoredSubject.mandatoryEquipment.filter(
+        (item) => item !== 'supervisor_badge'
+      );
+      legacyProgressReset = true;
+    }
+
+    const migrationNotes: string[] = [];
+    if (scheduleMigrated) {
+      migrationNotes.push(
+        '[保存] 旧7日間サイクルの保存データを30日間スケジュールへ移行しました。現在の日付・被験者・封筒・事後報告履歴は保持されています。'
+      );
+    }
+    if (legacyProgressReset) {
+      migrationNotes.push(
+        '[保存] 旧7日間サイクルの役割評価Eおよび監督用名札は、30日ランの16日目・29日目の条件へ引き継がないため初期化しました。'
+      );
+    }
+    if (legacyWaterKeyMigrated) {
+      migrationNotes.push(
+        '[保存] 旧給水器イベントの処理済み記録を30日ラン形式へ移行しました（同じ設置回の再飲用を防止）。'
+      );
+    }
+
     const restoredState: GameState = {
       cycle: restoredCycle,
-      subject: structuredClone(parsed.Subject),
+      subject: restoredSubject,
       trial: restoredTrial,
       deferredEvents: structuredClone(parsed.DeferredEvent),
       reportArchive: structuredClone(parsed.ReportArchive),
@@ -229,11 +288,7 @@ export function loadGameState(
       corruptedSaveNotice: null,
       lastActionLog: [
         `[${parsed.FacilityCycle.cycleId} / 第${parsed.FacilityCycle.day}日] 保存データを復元しました（seed・異常パラメータ・警告時計を保持）。`,
-        ...(scheduleMigrated
-          ? [
-              '[保存] 旧7日間サイクルの保存データを30日間スケジュールへ移行しました。現在の日付・被験者・封筒・事後報告履歴は保持されています。',
-            ]
-          : []),
+        ...migrationNotes,
       ],
     };
 

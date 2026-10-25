@@ -480,6 +480,7 @@ describe('NEED TO KNOW MVP Acceptance Criteria (AC01 - AC15)', () => {
     s1.subject.C = 3;
     s1.subject.S = 0;
     s1.subject.hasSupervisorBadge = true;
+    s1.subject.supervisorBadgeEarnedDay = 29;
     proceedFromMorning(s1, 'attempt_escape_with_supervisor_badge');
     expect(s1.cycle.endingResult).toBe('escape_attempt');
 

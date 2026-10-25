@@ -151,6 +151,7 @@ describe('30日間ラン', () => {
 
     const taskMsg = performSafeReevaluationTaskAtNight(state);
     expect(state.subject.hasSupervisorBadge).toBe(true);
+    expect(state.subject.supervisorBadgeEarnedDay).toBe(29);
     expect(taskMsg).toContain('29日目');
 
     proceedFromNightToNextDay(state);
@@ -190,6 +191,38 @@ describe('30日間ラン', () => {
     expect(state.subject.C).toBeGreaterThanOrEqual(1);
   });
 
+  it('給水器の比較面接は設置回ごとに安全協力のC+1を得られる', () => {
+    const state = createInitialGameState('FIXED-DEFAULT');
+
+    state.cycle.day = 2;
+    state.cycle.phase = 'morning';
+    prepareFacilityDay(state.cycle);
+    interactWaterCoolerInMorning(state, 'drink');
+    state.subject.C = 0;
+
+    state.cycle.day = 5;
+    state.cycle.phase = 'night';
+    proceedFromNightToNextDay(state);
+    expect(state.cycle.phase).toBe('morning_comparison');
+    const firstMsg = handleComparisonInterviewAction(state, 'cooperate_answer');
+    expect(firstMsg).toContain('C+1');
+    expect(state.subject.C).toBe(1);
+
+    state.cycle.day = 12;
+    state.cycle.phase = 'morning';
+    prepareFacilityDay(state.cycle);
+    interactWaterCoolerInMorning(state, 'drink');
+    state.subject.C = 0;
+
+    state.cycle.day = 15;
+    state.cycle.phase = 'night';
+    proceedFromNightToNextDay(state);
+    expect(state.cycle.phase).toBe('morning_comparison');
+    const secondMsg = handleComparisonInterviewAction(state, 'cooperate_answer');
+    expect(secondMsg).toContain('C+1');
+    expect(state.subject.C).toBe(1);
+  });
+
   it('旧7日間保存を読み込むと30日間スケジュールへ移行し、日付・被験者・封筒を保持する', () => {
     const backend = new MemoryStorageBackend();
     const state = createInitialGameState('FIXED-DEFAULT');
@@ -200,6 +233,16 @@ describe('30日間ラン', () => {
     state.cycle.waterCoolerPresent = true;
     (state.cycle as unknown as { waterCoolerInstallDay?: number | null }).waterCoolerInstallDay =
       undefined;
+    state.subject.E = 2;
+    state.subject.rewardedEventKeys.push(
+      `role-eval-d4-${state.subject.subjectId}`,
+      `role-eval-d7-${state.subject.subjectId}`
+    );
+    state.subject.hasSupervisorBadge = true;
+    state.subject.mandatoryEquipment = ['supervisor_badge'];
+    (state.subject as unknown as { supervisorBadgeEarnedDay?: number | null })
+      .supervisorBadgeEarnedDay = undefined;
+    state.cycle.processedEventIds.push(`day2-water-drink-${state.subject.subjectId}`);
     state.cycle.envelope = [
       {
         id: 'env-legacy',
@@ -227,6 +270,31 @@ describe('30日間ラン', () => {
     expect(
       loaded.state.lastActionLog.some((line) => line.includes('30日間スケジュールへ移行'))
     ).toBe(true);
+
+    // Legacy 7-day evaluation credits and supervisor badge are not valid in the 30-day run.
+    expect(loaded.state.subject.E).toBe(0);
+    expect(loaded.state.subject.rewardedEventKeys.some((key) => key.startsWith('role-eval-d'))).toBe(
+      false
+    );
+    expect(loaded.state.subject.hasSupervisorBadge).toBe(false);
+    expect(loaded.state.subject.supervisorBadgeEarnedDay).toBeNull();
+    expect(loaded.state.subject.mandatoryEquipment).not.toContain('supervisor_badge');
+
+    // Legacy drinking record is migrated to the 30-day key, so it cannot be drunk twice.
+    expect(loaded.state.cycle.processedEventIds).toContain(`water-drink-d2-${subjectId}`);
+    loaded.state.cycle.day = 2;
+    loaded.state.cycle.phase = 'morning';
+    loaded.state.cycle.waterCoolerPresent = true;
+    loaded.state.cycle.waterCoolerInstallDay = 2;
+    const legacyDrinkMsg = interactWaterCoolerInMorning(loaded.state, 'drink');
+    expect(legacyDrinkMsg).toContain('既に');
+
+    // Without a valid day-29 badge, the day-30 escape branch is unavailable.
+    loaded.state.cycle.day = 30;
+    loaded.state.cycle.phase = 'morning';
+    proceedFromMorning(loaded.state, 'attempt_escape_with_supervisor_badge');
+    expect(loaded.state.cycle.phase).toBe('briefing');
+    expect(loaded.state.cycle.endingResult).toBeNull();
   });
 
   it('30日終了後に新サイクルを開始すると、日付が1日に戻り施設コードだけが進む', () => {

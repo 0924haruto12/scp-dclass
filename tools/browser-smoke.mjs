@@ -240,6 +240,7 @@ try {
     state.cycle.phase = 'morning';
     state.cycle.endingResult = null;
     state.subject.hasSupervisorBadge = true;
+    state.subject.supervisorBadgeEarnedDay = 29;
     state.subject.C = 2;
     state.subject.S = 0;
     localStorage.setItem(
