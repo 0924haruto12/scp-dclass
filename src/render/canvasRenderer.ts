@@ -1,4 +1,4 @@
-import { GameState, Trial, WhiteDoorRoomId } from '../core/types';
+import { GameState, Trial } from '../core/types';
 import { getWhiteDoorSequence } from '../core/trials';
 import { drawIcon, OBJECT_ICONS } from './art';
 
@@ -394,22 +394,12 @@ export class TrialCanvasRenderer {
     ctx.lineTo(boothX, topPad + roomH);
     ctx.stroke();
 
-    // Camera surveillance zone around the restricted cabinet (x=14.5, y=-1.3)
-    const zoneX = toPxX(14.5);
-    const zoneY = toPxY(-1.3);
-    ctx.fillStyle = 'rgba(239, 68, 68, 0.12)';
-    ctx.beginPath();
-    ctx.arc(zoneX, zoneY, 48, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = COLORS.red;
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([4, 3]);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    drawIcon(ctx, 'camera', zoneX - 50, topPad + 12, 22);
+    // Show the camera and its operating lamp, not a coverage area the subject cannot measure.
+    const camX = toPxX(14.5);
+    drawIcon(ctx, 'camera', camX - 50, topPad + 12, 22);
     ctx.fillStyle = '#fca5a5';
     ctx.font = `10px ${MONO}`;
-    ctx.fillText('CAM-204 監視範囲', zoneX - 36, topPad - 6);
+    ctx.fillText('CAM-204 [REC]', camX - 36, topPad - 6);
 
     // Interactables drawn as floor plates with their icon
     for (const obj of trial.interactables) {
@@ -636,36 +626,38 @@ export class TrialCanvasRenderer {
     ctx.fillStyle = COLORS.muted;
     ctx.font = `10px ${MONO}`;
     ctx.fillText('接続順序', 24, top + 6);
-    const chain: (WhiteDoorRoomId | '?')[] = wd.windowDemoWatched ? seq : ['E', '?', '?', 'P'];
-    chain.forEach((room, i) => {
-      const nx = 44;
-      const ny = top + 28 + i * 42;
-      const isHere = wd.windowDemoWatched && room === wd.currentRoom;
-      if (i < chain.length - 1) {
-        ctx.strokeStyle = '#475569';
-        ctx.lineWidth = 2;
+    if (wd.windowDemoWatched) {
+      const chain = seq;
+      chain.forEach((room, i) => {
+        const nx = 44;
+        const ny = top + 28 + i * 42;
+        const isHere = room === wd.currentRoom;
+        if (i < chain.length - 1) {
+          ctx.strokeStyle = '#475569';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(nx, ny + 13);
+          ctx.lineTo(nx, ny + 29);
+          ctx.stroke();
+        }
+        ctx.fillStyle = isHere ? 'rgba(56, 189, 248, 0.25)' : '#0c1017';
         ctx.beginPath();
-        ctx.moveTo(nx, ny + 13);
-        ctx.lineTo(nx, ny + 29);
+        ctx.arc(nx, ny, 13, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = isHere ? COLORS.cyan : '#3d4f69';
+        ctx.lineWidth = 2;
         ctx.stroke();
-      }
-      ctx.fillStyle = isHere ? 'rgba(56, 189, 248, 0.25)' : '#0c1017';
-      ctx.beginPath();
-      ctx.arc(nx, ny, 13, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = isHere ? COLORS.cyan : '#3d4f69';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-      ctx.fillStyle = room === 'P' ? '#fbbf24' : isHere ? '#e0f2fe' : COLORS.muted;
-      ctx.font = `bold 12px ${MONO}`;
-      ctx.textAlign = 'center';
-      ctx.fillText(room, nx, ny + 4);
-      ctx.textAlign = 'left';
-    });
-    if (!wd.windowDemoWatched) {
+        ctx.fillStyle = room === 'P' ? '#fbbf24' : isHere ? '#e0f2fe' : COLORS.muted;
+        ctx.font = `bold 12px ${MONO}`;
+        ctx.textAlign = 'center';
+        ctx.fillText(room, nx, ny + 4);
+        ctx.textAlign = 'left';
+      });
+    } else {
+      // 観測窓で確認するまでは、部屋数と接続順を図で表示しない。
       ctx.fillStyle = COLORS.label;
       ctx.font = `10px ${SANS}`;
-      ctx.fillText('観測窓で未確認', 66, top + 74);
+      ctx.fillText('未確認（観測窓で確認）', 24, top + 28);
     }
 
     // Right panel: current room and recording board status
@@ -745,7 +737,7 @@ export class TrialCanvasRenderer {
     ctx.fillStyle = '#7dd3fc';
     ctx.font = `11px ${SANS}`;
     ctx.textAlign = 'center';
-    ctx.fillText('青い非常灯 [固定点・退避安全圏]', cx, cy - rx - 8);
+    ctx.fillText('青い非常灯', cx, cy - rx - 8);
     ctx.textAlign = 'left';
 
     // Recording board in room P
@@ -985,35 +977,20 @@ export class TrialCanvasRenderer {
     segment(`低速固定 ${trial.player.slowToggle ? 'ON' : 'OFF'}`, trial.player.slowToggle ? COLORS.green : COLORS.muted);
 
     ctx.textAlign = 'right';
-    ctx.fillStyle = remaining <= 20 ? '#f87171' : '#e2e8f0';
+    ctx.fillStyle = '#e2e8f0';
     ctx.fillText(`残り ${remaining.toFixed(1)}s`, width - 12, 21);
     ctx.textAlign = 'left';
 
-    // Timer bar
-    const ratio = trial.externalTimeLimit > 0 ? remaining / trial.externalTimeLimit : 0;
-    ctx.fillStyle = remaining <= 20 ? COLORS.red : COLORS.cyan;
-    ctx.fillRect(0, 32, width * ratio, 2);
-
     if (trial.omen.active) {
+      // 前兆は危険度の数値や警告アイコンではなく、知覚できる出来事として表示する。
       const pulse = 0.82 + 0.1 * Math.sin(trial.externalClock * 10);
-      ctx.fillStyle = `rgba(153, 27, 27, ${pulse})`;
+      ctx.fillStyle = `rgba(15, 23, 42, ${pulse})`;
       ctx.fillRect(14, 40, width - 28, 28);
-      ctx.strokeStyle = '#f87171';
+      ctx.strokeStyle = COLORS.amber;
       ctx.strokeRect(14.5, 40.5, width - 29, 27);
-      // Warning triangle
-      ctx.fillStyle = '#fecaca';
-      ctx.beginPath();
-      ctx.moveTo(30, 47);
-      ctx.lineTo(38, 61);
-      ctx.lineTo(22, 61);
-      ctx.closePath();
-      ctx.fill();
-      ctx.fillStyle = '#7f1d1d';
-      ctx.fillRect(29.2, 51, 1.6, 5);
-      ctx.fillRect(29.2, 57.5, 1.6, 1.6);
-      ctx.fillStyle = '#fecaca';
-      ctx.font = `bold 12px ${SANS}`;
-      ctx.fillText(`【知覚前兆】${trial.omen.text}`, 46, 58);
+      ctx.fillStyle = '#e2e8f0';
+      ctx.font = `12px ${SANS}`;
+      ctx.fillText(`【知覚記録】${trial.omen.text}`, 22, 58);
     }
   }
 }

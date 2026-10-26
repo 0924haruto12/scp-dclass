@@ -318,7 +318,7 @@ export const ENDING_VISUALS: Record<
 > = {
   escape_attempt: { seal: '01', tone: 'red', color: '#ef4444', icon: 'supervisor_badge' },
   termination_shortage: { seal: '02', tone: 'amber', color: '#f59e0b', icon: 'report' },
-  certified_useful: { seal: '03', tone: 'green', color: '#22c55e', icon: 'notebook' },
+  certified_useful: { seal: '03', tone: 'gray', color: '#94a3b8', icon: 'notebook' },
   termination_standard: { seal: '04', tone: 'gray', color: '#94a3b8', icon: 'document' },
 };
 
