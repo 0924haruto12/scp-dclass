@@ -46,6 +46,17 @@ import {
   traverseWhiteDoor,
 } from '../core/trials';
 import { GameState, MoveMode, OptionalItemId, RoomCode } from '../core/types';
+import {
+  brandMarkSvg,
+  ENDING_VISUALS,
+  endingSealSvg,
+  iconSvg,
+  ITEM_ICONS,
+  OBJECT_ICONS,
+  SCENE_BUNK_ENVELOPE,
+  SCENE_INTERCOM,
+  SCENE_TITLE_CORRIDOR,
+} from '../render/art';
 import { TrialCanvasRenderer } from '../render/canvasRenderer';
 
 export class NeedToKnowApp {
@@ -455,8 +466,11 @@ export class NeedToKnowApp {
       <div class="ntk-shell">
         <header class="ntk-header">
           <div class="ntk-brand">
-            <span class="ntk-badge-classify">NEED TO KNOW // LEVEL 0</span>
-            <h1 class="ntk-title">第██収容区画 実験補助端末</h1>
+            ${brandMarkSvg(38)}
+            <div>
+              <span class="ntk-badge-classify">NEED TO KNOW // LEVEL 0</span>
+              <h1 class="ntk-title">第██収容区画 実験補助端末</h1>
+            </div>
           </div>
           <div class="ntk-meta-bar">
             <div class="meta-chip">施設コード: <strong>${this.escapeHtml(cycle.cycleId)}</strong></div>
@@ -473,19 +487,19 @@ export class NeedToKnowApp {
           </div>
           <div class="ntk-QuickActions">
             <button type="button" class="btn-terminal" id="btn-open-notebook">
-              携帯ノート [N] (${
+              ${iconSvg('notebook', 18)}携帯ノート [N] (${
                 subject.portableNote.observations.filter((o) => !o.erased).length +
                 subject.portableNote.rumors.filter((r) => !r.erased).length
               })
             </button>
             <button type="button" class="btn-terminal" id="btn-open-archive">
-              事後報告履歴 (${this.state.reportArchive.length})
+              ${iconSvg('report', 18)}事後報告履歴 (${this.state.reportArchive.length})
             </button>
             <button type="button" class="btn-terminal" id="btn-open-orientation">
-              交付文書
+              ${iconSvg('document', 18)}交付文書
             </button>
             <button type="button" class="btn-terminal" id="btn-open-settings">
-              設定・ポーズ [P]
+              ${iconSvg('pause', 18)}設定・ポーズ [P]
             </button>
           </div>
         </header>
@@ -527,11 +541,16 @@ export class NeedToKnowApp {
             <span class="status-label">持込品(最大2):</span>
             <span class="status-val">${
               subject.inventory.length > 0
-                ? subject.inventory.map((i) => OPTIONAL_ITEM_LABELS[i].name).join('、')
+                ? subject.inventory
+                    .map(
+                      (i) =>
+                        `<span class="inv-item">${iconSvg(ITEM_ICONS[i], 18)}${OPTIONAL_ITEM_LABELS[i].name}</span>`
+                    )
+                    .join('、')
                 : 'なし'
             }${
               subject.hasSupervisorBadge
-                ? ` ＋【監督用名札 ${SUPERVISOR_BADGE_CODE}】`
+                ? ` ＋<span class="inv-item inv-key">${iconSvg('supervisor_badge', 18)}【監督用名札 ${SUPERVISOR_BADGE_CODE}】</span>`
                 : ''
             }</span>
           </div>
@@ -606,12 +625,18 @@ export class NeedToKnowApp {
     if (cycle.phase === 'title') {
       return `
         <div class="phase-card title-screen">
-          <div class="dossier-stamp">RESTRICTED // NEED TO KNOW</div>
-          <h2>NEED TO KNOW — 30日間ラン検証プロトタイプ</h2>
-          <p class="lead-copy">
-            あなたは何を担当させられるのか知らされないまま収容区画へ送り込まれるDクラス職員である。<br>
-            異常の正式名称もオブジェクトクラスも開示されない。30日目の月末処分まで、前兆を観察し、推理ノートで仮説を組み、指示に潜む危険を見極めて生き延びよ。
-          </p>
+          <div class="title-hero">
+            <div class="title-copy">
+              <div class="dossier-stamp">RESTRICTED // D-CLASS PERSONNEL ONLY</div>
+              <h2 class="title-logo">NEED TO KNOW<span class="title-logo-sub">30日間ラン検証プロトタイプ</span></h2>
+              <p class="lead-copy">
+                あなたは何を担当させられるのか知らされないまま収容区画へ送り込まれるDクラス職員である。<br>
+                異常の正式名称もオブジェクトクラスも開示されない。30日目の月末処分まで、前兆を観察し、推理ノートで仮説を組み、指示に潜む危険を見極めて生き延びよ。
+              </p>
+            </div>
+            ${SCENE_TITLE_CORRIDOR}
+            <div class="title-watermark" aria-hidden="true">30</div>
+          </div>
           <div class="pillar-grid">
             <div class="pillar-box">
               <strong>1. 無知が初期状態</strong>
@@ -658,7 +683,10 @@ export class NeedToKnowApp {
       const originDayLabel = originEvent ? `第${originEvent.originDay}日` : '以前';
       return `
         <div class="phase-card alert-card">
-          <h2>【緊急事態】第${cycle.day}日 朝 — 同一番号個体の比較面接</h2>
+          <div class="phase-figure-row">
+            ${iconSvg('cellmates', 52, { className: 'phase-figure' })}
+            <h2>【緊急事態】第${cycle.day}日 朝 — 同一番号個体の比較面接</h2>
+          </div>
           <p>
             昨夜、あなたの房に「あなたと全く同じ顔・同じ番号（${this.escapeHtml(
               subject.subjectId
@@ -740,8 +768,13 @@ export class NeedToKnowApp {
             waterCoolerInstallDay !== null
               ? `
             <div class="special-event-box">
-              <h3>共用室（区画 W-00）：第${waterCoolerInstallDay}日設置の給水器</h3>
-              <p>今朝から共用室の隅に説明のない給水器が設置されている。通常の配給水は別に確保されており、飲まなくても脱水にはならない。</p>
+              <div class="panel-figure">
+                ${iconSvg('water_cooler', 48, { className: 'panel-figure-icon' })}
+                <div>
+                  <h3>共用室（区画 W-00）：第${waterCoolerInstallDay}日設置の給水器</h3>
+                  <p>今朝から共用室の隅に説明のない給水器が設置されている。通常の配給水は別に確保されており、飲まなくても脱水にはならない。</p>
+                </div>
+              </div>
               <div class="btn-row">
                 <button type="button" class="btn-secondary" id="btn-water-clues">
                   管理票・点呼票・医務記録を調べる（枠消費なし）
@@ -773,9 +806,12 @@ export class NeedToKnowApp {
           <div class="morning-grid">
             <div class="sub-panel">
               <h3>1. 寝台下の封筒と配布文書</h3>
-              <p>寝台下の封筒には最大3件の引き継ぎメモが保管される（現在 <strong>${
-                cycle.envelope.length
-              }</strong> 件封入）。</p>
+              <div class="panel-figure">
+                ${iconSvg('envelope', 44, { className: 'panel-figure-icon' })}
+                <p>寝台下の封筒には最大3件の引き継ぎメモが保管される（現在 <strong>${
+                  cycle.envelope.length
+                }</strong> 件封入）。</p>
+              </div>
               <div class="btn-row">
                 <button type="button" class="btn-secondary" id="btn-morning-envelope">
                   寝台下の封筒を調べて読む（${
@@ -794,9 +830,12 @@ export class NeedToKnowApp {
                 ${CELLMATES.map(
                   (cm) => `
                   <div class="cellmate-item">
-                    <div>
-                      <strong>${this.escapeHtml(cm.code)}</strong>
-                      <div class="cm-hint">${this.escapeHtml(cm.roleHint)}</div>
+                    <div class="cellmate-id">
+                      ${iconSvg('cellmates', 30)}
+                      <div>
+                        <strong>${this.escapeHtml(cm.code)}</strong>
+                        <div class="cm-hint">${this.escapeHtml(cm.roleHint)}</div>
+                      </div>
                     </div>
                     <button type="button" class="btn-terminal btn-talk-cm" data-cm="${cm.id}" ${
                     cycle.morningActionsLeft <= 0 ? 'disabled' : ''
@@ -817,7 +856,7 @@ export class NeedToKnowApp {
                         ? 'disabled'
                         : ''
                     }>
-                    ${OPTIONAL_ITEM_LABELS[itemId].name}${
+                    ${iconSvg(ITEM_ICONS[itemId], 16)}${OPTIONAL_ITEM_LABELS[itemId].name}${
                       subject.inventory.includes(itemId) ? '(所持)' : ''
                     }
                   </button>
@@ -835,7 +874,7 @@ export class NeedToKnowApp {
               subject.supervisorBadgeEarnedDay === SAFE_REEVAL_UNLOCK_DAY
                 ? `
               <button type="button" class="btn-danger" id="btn-final-day-escape">
-                【30日目進路選択】監督用名札（${SUPERVISOR_BADGE_CODE}）を着けて有人門衛を抜け、外門検問へ進む
+                ${iconSvg('supervisor_badge', 18)}【30日目進路選択】監督用名札（${SUPERVISOR_BADGE_CODE}）を着けて有人門衛を抜け、外門検問へ進む
               </button>
             `
                 : ''
@@ -858,6 +897,7 @@ export class NeedToKnowApp {
       return `
         <div class="phase-card briefing-card">
           <h2>【第 ${cycle.day} 日 召集】試験室入室前通達</h2>
+          <div class="briefing-layout">
           <div class="dossier-table">
             <div class="dossier-row">
               <span>呼出番号</span>
@@ -881,6 +921,14 @@ export class NeedToKnowApp {
         resProfile.voiceTrait
       )}</span>
             </div>
+          </div>
+          <figure class="briefing-figure">
+            ${SCENE_INTERCOM}
+            <figcaption>
+              ${iconSvg('intercom', 16)}
+              区画 ${this.escapeHtml(sched.roomCode)} 接続中 — 入室後はインターホンで指示が届く
+            </figcaption>
+          </figure>
           </div>
           <div class="proceed-bar">
             <button type="button" class="btn-primary" id="btn-enter-trial">
@@ -929,7 +977,10 @@ export class NeedToKnowApp {
               : ''
           }
 
-          <h3>担当官からの聴取：「試験室での停止や行動の理由を説明してください」</h3>
+          <h3 class="heading-with-icon">${iconSvg(
+            'intercom',
+            22
+          )}担当官からの聴取：「試験室での停止や行動の理由を説明してください」</h3>
           <div class="debrief-choices">
             ${choices
               .map((c) => {
@@ -965,7 +1016,10 @@ export class NeedToKnowApp {
       const latestReport = this.state.reportArchive[this.state.reportArchive.length - 1];
       return `
         <div class="phase-card death-card">
-          <div class="dossier-stamp stamp-danger">SUBJECT TERMINATED // DECEASED</div>
+          <div class="phase-figure-row">
+            ${iconSvg('report', 48, { className: 'phase-figure' })}
+            <div class="dossier-stamp stamp-danger">SUBJECT TERMINATED // DECEASED</div>
+          </div>
           <h2>【事後報告書（死亡除籍記録）】被験者 ${this.escapeHtml(subject.subjectId)}</h2>
           <div class="clinical-report-box">
             <p><strong>施設コード:</strong> ${this.escapeHtml(cycle.cycleId)} ／ <strong>発生日:</strong> 第 ${
@@ -1039,6 +1093,7 @@ export class NeedToKnowApp {
           <div class="morning-grid">
             <div class="sub-panel">
               <h3>1. 寝台下の封筒への複写（1枠・最大3件）</h3>
+              ${SCENE_BUNK_ENVELOPE}
               <p>携帯ノートから最大3件を寝台下の封筒へ複写して隠します（現在の記録から上位3件を封入）。</p>
               <button type="button" class="btn-primary" id="btn-night-copy-envelope" ${
                 cycle.nightActionsLeft <= 0 ||
@@ -1049,7 +1104,7 @@ export class NeedToKnowApp {
                 携帯ノートの最新記録（最大3件）を寝台下の封筒へ複写する (1枠)
               </button>
               <button type="button" class="btn-secondary" id="btn-night-open-note" style="margin-top:8px;">
-                携帯ノートを開いて仮説を整理する（枠消費なし）
+                ${iconSvg('notebook', 18)}携帯ノートを開いて仮説を整理する（枠消費なし）
               </button>
             </div>
 
@@ -1057,12 +1112,15 @@ export class NeedToKnowApp {
               <h3>2. 安全な再評価業務・同房者会話（各1枠）</h3>
               <p>
                 <strong>安全な再評価業務:</strong> 備品点検と定型票提出を行い、信用を回復（C+1）し疑念を緩和（S-1）します。
-                ${
-                  nightSched.hasSafeReevalUnlock
-                    ? `<br><strong>※${cycle.day}日目特別条件:</strong> 完了後に C>=2 かつ S<=1 を満たすと、翌朝使える「監督用名札」が支給されます！`
-                    : ''
-                }
               </p>
+              ${
+                nightSched.hasSafeReevalUnlock
+                  ? `<div class="panel-figure unlock-note">
+                      ${iconSvg('supervisor_badge', 40, { className: 'panel-figure-icon' })}
+                      <p><strong>※${cycle.day}日目特別条件:</strong> 完了後に C>=2 かつ S<=1 を満たすと、翌朝使える「監督用名札」が支給されます！</p>
+                    </div>`
+                  : ''
+              }
               <button type="button" class="btn-primary" id="btn-night-safe-task" ${
                 cycle.nightActionsLeft <= 0 ||
                 subject.rewardedEventKeys.includes(`night-safe-task-d${cycle.day}-${subject.subjectId}`)
@@ -1093,11 +1151,18 @@ export class NeedToKnowApp {
     // Ending Phase
     const endingType = cycle.endingResult ?? 'termination_standard';
     const endDesc = ENDING_DESCRIPTIONS[endingType];
+    const endVisual = ENDING_VISUALS[endingType];
     return `
-      <div class="phase-card ending-card">
-        <div class="dossier-stamp">${this.escapeHtml(endDesc.code)}</div>
-        <h2>${this.escapeHtml(endDesc.title)}</h2>
-        <p class="lead-copy">${this.escapeHtml(endDesc.summary)}</p>
+      <div class="phase-card ending-card ending-tone-${endVisual.tone}">
+        <div class="ending-hero">
+          ${endingSealSvg(endingType)}
+          <div class="ending-hero-copy">
+            <div class="dossier-stamp">${this.escapeHtml(endDesc.code)}</div>
+            <h2>${this.escapeHtml(endDesc.title)}</h2>
+            <p class="lead-copy">${this.escapeHtml(endDesc.summary)}</p>
+          </div>
+          ${iconSvg(endVisual.icon, 56, { className: 'ending-hero-icon' })}
+        </div>
         <div class="clinical-report-box" style="white-space:pre-line;">${this.escapeHtml(
           endDesc.detail
         )}</div>
@@ -1231,7 +1296,7 @@ export class NeedToKnowApp {
         <div class="trial-side-col">
           <div class="intercom-box">
             <div class="intercom-header">
-              <span>インターホン指示 (${
+              <span>${iconSvg('intercom', 16)}インターホン指示 (${
                 trial.researcher === 'Researcher-A' ? '担当官 A' : '担当官 B'
               })</span>
               <span class="inst-status">[${activeInst?.status ?? 'active'}]</span>
@@ -1268,7 +1333,9 @@ export class NeedToKnowApp {
                 <button type="button" class="btn-obj ${
                   obj.restricted ? 'btn-obj-restricted' : ''
                 }" data-obj="${obj.id}">
-                  <span>${this.escapeHtml(obj.label)}</span>
+                  <span class="obj-name">${iconSvg(OBJECT_ICONS[obj.id] ?? 'document', 22)}${this.escapeHtml(
+                    obj.label
+                  )}</span>
                   <span class="obj-tag">${obj.inspected ? '調査済' : '調べる'}</span>
                 </button>
               `
@@ -1278,7 +1345,7 @@ export class NeedToKnowApp {
                 trial.roomCode === 'T-204' && trial.badge.rationTerminalChecked
                   ? `
                 <button type="button" class="btn-obj" id="btn-t204-reverify-now">
-                  <span>処遇票の不一致に異議を出し、機械再照合を受ける</span>
+                  <span class="obj-name">${iconSvg('terminal', 22)}処遇票の不一致に異議を出し、機械再照合を受ける</span>
                   <span class="obj-tag">${trial.badge.reverified ? '訂正済' : '再照合'}</span>
                 </button>
               `
@@ -1312,7 +1379,7 @@ export class NeedToKnowApp {
       <div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="携帯推理ノート">
         <div class="modal-window">
           <div class="modal-header">
-            <h3>携帯推理ノート（開いている間は実験時計・危険進行を停止）</h3>
+            <h3 class="heading-with-icon">${iconSvg('notebook', 22)}携帯推理ノート（開いている間は実験時計・危険進行を停止）</h3>
             <button type="button" class="btn-terminal" id="btn-close-notebook">閉じる [N]</button>
           </div>
           <div class="notebook-tabs">
@@ -1446,7 +1513,7 @@ export class NeedToKnowApp {
       <div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="事後報告履歴">
         <div class="modal-window">
           <div class="modal-header">
-            <h3>事後報告履歴 ［プレイヤー向け閲覧画面・被験者の所持文書ではありません］</h3>
+            <h3 class="heading-with-icon">${iconSvg('report', 22)}事後報告履歴 ［プレイヤー向け閲覧画面・被験者の所持文書ではありません］</h3>
             <button type="button" class="btn-terminal" id="btn-close-archive">閉じる</button>
           </div>
           <p class="clinical-note">
@@ -1489,7 +1556,7 @@ export class NeedToKnowApp {
       <div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="配属時交付文書">
         <div class="modal-window">
           <div class="modal-header">
-            <h3>${this.escapeHtml(ORIENTATION_DOCUMENT.title)}</h3>
+            <h3 class="heading-with-icon">${iconSvg('document', 22)}${this.escapeHtml(ORIENTATION_DOCUMENT.title)}</h3>
             <button type="button" class="btn-terminal" id="btn-close-orientation">閉じる</button>
           </div>
           <div class="clinical-report-box">
