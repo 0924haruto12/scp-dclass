@@ -40,9 +40,10 @@ page.on('console', (message) => {
 
 const click = async (selector) => {
   // Some buttons replace the whole UI synchronously. Click through the DOM and
-  // yield briefly so the new frame is rendered before the next step.
+  // yield briefly so the new frame is rendered before the next step. Verification
+  // presets can live inside a closed <details>, so presence is enough here.
   try {
-    await page.waitForSelector(selector, { timeout: 5000 });
+    await page.waitForSelector(selector, { timeout: 5000, state: 'attached' });
   } catch {
     const diagnostic = await page.evaluate(() => {
       const state = window.__NTK_APP__.getState();

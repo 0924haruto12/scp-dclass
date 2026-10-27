@@ -73,10 +73,12 @@ export class NeedToKnowApp {
   private archiveModalOpen = false;
   private settingsModalOpen = false;
   private orientationModalOpen = false;
+  private helpModalOpen = false;
 
   // Real-time input states for Trial
   private keysDown = new Set<string>();
   private manualMoveOverride: { moveX: number; moveY: number; mode: MoveMode } | null = null;
+  private selectedMoveMode: Exclude<MoveMode, 'stop'> = 'normal';
   private animFrameId: number | null = null;
   private lastFrameTime = 0;
   private lastAutoSaveAt = 0;
@@ -96,6 +98,9 @@ export class NeedToKnowApp {
       this.state.cycle.phase = 'title';
     }
 
+    if (this.state.trial?.player.slowToggle) {
+      this.selectedMoveMode = 'slow';
+    }
     this.setupGlobalListeners();
     this.renderUI();
     this.startLoop();
@@ -127,8 +132,14 @@ export class NeedToKnowApp {
     }
   }
 
+  private clearMovementInputs(): void {
+    this.keysDown.clear();
+    this.manualMoveOverride = null;
+  }
+
   private setupGlobalListeners(): void {
     window.addEventListener('blur', () => {
+      this.clearMovementInputs();
       if (this.state.trial && this.state.trial.status === 'active') {
         setTrialPause(this.state.trial, 'blur');
         this.autoSave();
@@ -143,10 +154,18 @@ export class NeedToKnowApp {
 
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState !== 'hidden') return;
+      this.clearMovementInputs();
       if (this.state.trial && this.state.trial.status === 'active') {
         setTrialPause(this.state.trial, 'blur');
       }
       this.autoSave();
+    });
+
+    window.addEventListener('pointerup', () => {
+      this.manualMoveOverride = null;
+    });
+    window.addEventListener('pointercancel', () => {
+      this.manualMoveOverride = null;
     });
 
     window.addEventListener('keydown', (e) => {
@@ -156,8 +175,11 @@ export class NeedToKnowApp {
       }
 
       const key = e.key.toLowerCase();
-      this.keysDown.add(key);
-
+      if (key === 'h') {
+        e.preventDefault();
+        this.toggleHelp();
+        return;
+      }
       if (key === 'n') {
         e.preventDefault();
         this.toggleNotebook();
@@ -169,20 +191,33 @@ export class NeedToKnowApp {
         return;
       }
 
-      if (this.state.cycle.phase === 'trial' && this.state.trial) {
-        const trial = this.state.trial;
-        if (key === 'c') {
-          e.preventDefault();
-          trial.player.slowToggle = !trial.player.slowToggle;
-          this.renderUI();
-        } else if (key === 'q') {
-          trial.player.facingAngle -= 0.35;
-        } else if (key === 'e') {
-          trial.player.facingAngle += 0.35;
-        } else if (key === 'f') {
-          e.preventDefault();
-          this.interactNearestObject();
-        }
+      const trial = this.state.cycle.phase === 'trial' ? this.state.trial : null;
+      if (!trial || trial.status !== 'active') return;
+
+      const replyKeys = { '1': 'obey', '2': 'delay', '3': 'refuse', '4': 'question' } as const;
+      const reply = replyKeys[key as keyof typeof replyKeys];
+      if (reply) {
+        e.preventDefault();
+        document.querySelector<HTMLButtonElement>(`.btn-reply[data-reply="${reply}"]`)?.click();
+        return;
+      }
+
+      this.keysDown.add(key);
+      if (key === 'c') {
+        e.preventDefault();
+        trial.player.slowToggle = !trial.player.slowToggle;
+        this.selectedMoveMode = trial.player.slowToggle ? 'slow' : 'normal';
+        this.manualMoveOverride = null;
+        this.renderUI();
+      } else if (key === 'q' || key === 'r') {
+        e.preventDefault();
+        trial.player.facingAngle += key === 'q' ? -0.35 : 0.35;
+      } else if (key === 'e' || key === 'f') {
+        e.preventDefault();
+        this.interactNearestObject();
+      } else if (key === ' ') {
+        // Do not activate a focused button while Space is being used to stop.
+        e.preventDefault();
       }
     });
 
@@ -329,8 +364,27 @@ export class NeedToKnowApp {
     }
   }
 
+  private toggleHelp(): void {
+    this.helpModalOpen = !this.helpModalOpen;
+    this.clearMovementInputs();
+    if (this.state.trial) {
+      setTrialPause(
+        this.state.trial,
+        this.helpModalOpen
+          ? 'pause_menu'
+          : this.notebookOpen
+          ? 'notebook'
+          : this.settingsModalOpen
+          ? 'settings'
+          : 'none'
+      );
+    }
+    this.renderUI();
+  }
+
   private toggleNotebook(): void {
     this.notebookOpen = !this.notebookOpen;
+    this.clearMovementInputs();
     if (this.state.trial) {
       setTrialPause(
         this.state.trial,
@@ -342,6 +396,7 @@ export class NeedToKnowApp {
 
   private togglePauseOrSettings(): void {
     this.settingsModalOpen = !this.settingsModalOpen;
+    this.clearMovementInputs();
     if (this.state.trial) {
       setTrialPause(
         this.state.trial,
@@ -404,25 +459,39 @@ export class NeedToKnowApp {
     }
     const posEl = document.getElementById('live-trial-pos');
     if (posEl) {
+      const moveMode =
+        trial.player.moveMode === 'run'
+          ? '走行'
+          : trial.player.moveMode === 'slow'
+          ? '低速'
+          : trial.player.moveMode === 'normal'
+          ? '通常'
+          : '停止';
+      const controlState = `移動: ${moveMode} | 低速固定 [C]: ${trial.player.slowToggle ? 'ON' : 'OFF'}`;
       if (trial.roomCode === 'T-101') {
-        posEl.textContent = `位置: ${trial.player.x.toFixed(1)}m / 24.0m | 状態: ${
+        const footsteps =
           trial.gait.state === 'approaching'
-            ? '【接近前兆発生中！ 停止0.5s または 低速1.0s で解除】'
+            ? '間近で重なる'
             : trial.gait.state === 'retreating'
-            ? '【足音が遠のく（解除中）】'
-            : '追従中（安全圏）'
-        }`;
+            ? '遠のいている'
+            : '後ろで追従';
+        posEl.textContent = `位置: ${trial.player.x.toFixed(1)}m / 24.0m | 背後の足音: ${footsteps} | ${controlState}`;
       } else if (trial.roomCode === 'T-309') {
         const wd = trial.whiteDoor;
         posEl.textContent = wd.mainSectorOpened
-          ? `現在室: 室${wd.currentRoom} | 非常灯固定点: ${
-              wd.onAnchorPoint ? '退避中(安全)' : '範囲外(危険)'
-            } | 内部周期: ${wd.phaseCycleClock.toFixed(1)} / 30.0`
-          : '前室（安全確認中）';
+          ? `現在室: 室${wd.currentRoom} | 青い非常灯の固定点: ${
+              wd.onAnchorPoint ? '真上' : '離れている'
+            }${
+              // The internal phase clock is a rule value; keep it in the developer log only.
+              this.state.settings.devLogVisible
+                ? ` | [DEV] 内部周期: ${wd.phaseCycleClock.toFixed(1)} / 30.0`
+                : ''
+            }`
+          : '前室（観測と時刻の確認ができます）';
       } else {
         posEl.textContent = `名札表示: ${this.state.subject.displayedBadgeNumber} | 面接: ${
           trial.badge.interviewCompleted ? '完了' : '未完'
-        } | 返却: ${trial.badge.badgeReturned ? '済' : '未'}`;
+        } | 返却: ${trial.badge.badgeReturned ? '済' : '未'} | ${controlState}`;
       }
     }
   }
@@ -494,6 +563,9 @@ export class NeedToKnowApp {
             </button>
             <button type="button" class="btn-terminal" id="btn-open-archive">
               ${iconSvg('report', 18)}事後報告履歴 (${this.state.reportArchive.length})
+            </button>
+            <button type="button" class="btn-terminal" id="btn-open-help">
+              ${iconSvg('document', 18)}遊び方 [H]
             </button>
             <button type="button" class="btn-terminal" id="btn-open-orientation">
               ${iconSvg('document', 18)}交付文書
@@ -589,6 +661,7 @@ export class NeedToKnowApp {
         ${this.archiveModalOpen ? this.renderArchiveModal() : ''}
         ${this.settingsModalOpen ? this.renderSettingsModal() : ''}
         ${this.orientationModalOpen ? this.renderOrientationModal() : ''}
+        ${this.helpModalOpen ? this.renderHelpModal() : ''}
       </div>
     `;
 
@@ -742,6 +815,15 @@ export class NeedToKnowApp {
           <div class="stage-note">${this.escapeHtml(stage.description)} ／ 本日予定区画: ${this.escapeHtml(
             this.getRoomCustomName(sched.roomCode)
           )}</div>
+
+          ${
+            cycle.day === 1
+              ? `<div class="tutorial-callout day-flow-guide">
+                  <strong>1日の流れ:</strong> 朝（最大2行動）→ 召集 → 実験 → 事後聴取 → 夜（最大2行動）<br>
+                  朝の行動は省略できます。迷ったら「遊び方 [H]」で操作と画面の見方を確認してください。
+                </div>`
+              : ''
+          }
 
           ${
             subject.badgeTargetStatus === 'hazard_uncorrected'
@@ -930,6 +1012,18 @@ export class NeedToKnowApp {
             </figcaption>
           </figure>
           </div>
+          <details class="controls-cheatsheet" ${cycle.day === 1 ? 'open' : ''}>
+            <summary>入室前に基本操作を確認</summary>
+            <div class="cheatsheet-grid">
+              <span><kbd>WASD</kbd> / 矢印: 移動</span>
+              <span><kbd>Shift</kbd>: 走行 / <kbd>C</kbd>: 低速切替</span>
+              <span><kbd>E</kbd> / <kbd>F</kbd>: 最寄りを調べる</span>
+              <span><kbd>1</kbd>〜<kbd>4</kbd>: インターホンへ返答</span>
+              <span><kbd>N</kbd>: ノート / <kbd>P</kbd>: ポーズ</span>
+              <span><kbd>H</kbd>: 遊び方を開く</span>
+            </div>
+            <p>ノート・設定・遊び方を開いている間は実験時計が止まります。実験中は2秒ごとに自動保存されます。</p>
+          </details>
           <div class="proceed-bar">
             <button type="button" class="btn-primary" id="btn-enter-trial">
               試験室 ${sched.roomCode} へ入室して実験を開始する
@@ -1196,6 +1290,111 @@ export class NeedToKnowApp {
     `;
   }
 
+  private getTrialProgressItems(
+    trial: NonNullable<GameState['trial']>
+  ): Array<{ label: string; done: boolean }> {
+    if (trial.roomCode === 'T-101') {
+      return [
+        { label: '回収箱を確保', done: trial.player.carryingObjective },
+        { label: '入口へ持ち帰って退室', done: trial.status === 'survived' },
+      ];
+    }
+    if (trial.roomCode === 'T-204') {
+      return [
+        { label: '支給名札を着用', done: trial.badge.wearingSuppliedBadge || trial.badge.badgeReturned },
+        { label: '面接を完了', done: trial.badge.interviewCompleted },
+        { label: '名札を返却', done: trial.badge.badgeReturned },
+      ];
+    }
+    return [
+      { label: '前室で内部を観測', done: trial.whiteDoor.windowDemoWatched },
+      { label: '室Pの記録板を回収', done: trial.whiteDoor.recordingBoardCollected },
+      { label: '室Eの入口へ帰還', done: trial.status === 'survived' },
+    ];
+  }
+
+  private renderTrialObjective(trial: NonNullable<GameState['trial']>): string {
+    // Show the assignment issued at the summons, not whichever intercom instruction is active:
+    // later instructions may be load tests, and listing them here would read as the game endorsing them.
+    const assignment = trial.instructions[0];
+    return `
+      <section class="trial-objective-panel" aria-label="割当作業">
+        <div class="objective-summary">
+          <span class="objective-kicker">割当作業（召集時の通達）</span>
+          <strong>${this.escapeHtml(assignment?.objective ?? '室内を確認する')}</strong>
+        </div>
+        <ul class="objective-checklist">
+          ${this.getTrialProgressItems(trial)
+            .map(
+              (item) => `<li class="${item.done ? 'done' : ''}"><span aria-hidden="true">${
+                item.done ? '✓' : '○'
+              }</span> ${this.escapeHtml(item.label)}</li>`
+            )
+            .join('')}
+        </ul>
+        <div class="objective-condition">完了条件: ${this.escapeHtml(
+          assignment?.completionCondition ?? '指示を確認する'
+        )}</div>
+      </section>
+    `;
+  }
+
+  private getObjectActionLabel(
+    obj: NonNullable<GameState['trial']>['interactables'][number],
+    trial: NonNullable<GameState['trial']>
+  ): string {
+    if (obj.id === 'obj-t101-box' && trial.player.carryingObjective) return '所持中';
+    if (obj.id === 'obj-t204-counter' && trial.badge.wearingSuppliedBadge) return '着用中';
+    if (obj.id === 'obj-t204-booth' && trial.badge.interviewCompleted) return '面接済';
+    if (obj.id === 'obj-t204-tray' && trial.badge.badgeReturned) return '返却済';
+    if (obj.id === 'obj-t309-board' && trial.whiteDoor.recordingBoardCollected) return '回収済';
+    if (obj.inspected) return '調査済';
+    if (obj.id === 'obj-t101-box' || obj.id === 'obj-t309-board') return '回収';
+    if (obj.id === 'obj-t204-counter') return '名札を着る';
+    if (obj.id === 'obj-t204-booth') return '面接を受ける';
+    if (obj.id === 'obj-t204-tray') return '返却';
+    if (obj.id === 'obj-t309-open-main') return '入室';
+    return '調べる';
+  }
+
+  private renderHoldMovementControls(trial: NonNullable<GameState['trial']>): string {
+    if (trial.roomCode === 'T-309') return '';
+    const speedButtons = (['slow', 'normal', 'run'] as const)
+      .map((mode) => {
+        const label = mode === 'slow' ? '低速' : mode === 'normal' ? '通常' : '走行';
+        const speed = mode === 'slow' ? 1 : mode === 'normal' ? 2 : 4;
+        return `<button type="button" class="btn-tactical speed-btn ${
+          this.selectedMoveMode === mode ? 'active' : ''
+        }" data-move-speed="${mode}" aria-pressed="${this.selectedMoveMode === mode}">
+          ${label} ${speed}u/s
+        </button>`;
+      })
+      .join('');
+    return `
+      <div class="movement-controls">
+        <div class="movement-speed" role="group" aria-label="移動速度">
+          <span class="ctrl-label">移動速度:</span>${speedButtons}
+        </div>
+        ${
+          trial.roomCode === 'T-101'
+            ? `<div class="movement-pad movement-pad-corridor" aria-label="移動方向">
+                <button type="button" class="btn-tactical hold-move" data-hold-move-x="-1" data-hold-move-y="0">← 入口へ</button>
+                <button type="button" class="btn-tactical hold-stop" data-hold-stop>停止 [Space]</button>
+                <button type="button" class="btn-tactical hold-move" data-hold-move-x="1" data-hold-move-y="0">奥へ →</button>
+              </div>`
+            : `<div class="movement-pad" aria-label="移動方向">
+                <span></span><button type="button" class="btn-tactical hold-move" data-hold-move-x="0" data-hold-move-y="-1" aria-label="上へ移動">↑</button><span></span>
+                <button type="button" class="btn-tactical hold-move" data-hold-move-x="-1" data-hold-move-y="0" aria-label="左へ移動">←</button>
+                <button type="button" class="btn-tactical hold-stop" data-hold-stop>停止</button>
+                <button type="button" class="btn-tactical hold-move" data-hold-move-x="1" data-hold-move-y="0" aria-label="右へ移動">→</button>
+                <span></span><button type="button" class="btn-tactical hold-move" data-hold-move-x="0" data-hold-move-y="1" aria-label="下へ移動">↓</button><span></span>
+              </div>`
+        }
+        <p class="movement-help">方向ボタンは押している間だけ移動します。キーボードは WASD / 矢印、Shiftで走行、Cで低速切替です。</p>
+      </div>
+    `;
+  }
+
   private renderTrialPhase(trial: NonNullable<GameState['trial']>): string {
     const activeInst =
       trial.instructions.find((i) => i.status === 'active') ||
@@ -1216,6 +1415,7 @@ export class NeedToKnowApp {
       `
           : ''
       }
+      ${this.renderTrialObjective(trial)}
       <div class="trial-layout">
         <div class="trial-canvas-col">
           <div class="trial-status-bar">
@@ -1232,64 +1432,55 @@ export class NeedToKnowApp {
           </div>
 
           <div class="tactical-controls">
-            <div class="control-group">
-              <span class="ctrl-label">移動操作 (WASD / クリック検証):</span>
-              ${
-                trial.roomCode === 'T-101'
-                  ? `
-                <button type="button" class="btn-tactical" data-step-mode="stop" data-step-dir="0" data-step-sec="0.6">
-                  停止 0.6s [Space] (接近解除)
-                </button>
-                <button type="button" class="btn-tactical" data-step-mode="slow" data-step-dir="1" data-step-sec="2.0">
-                  奥へ低速 2s (1u/s)
-                </button>
-                <button type="button" class="btn-tactical" data-step-mode="normal" data-step-dir="1" data-step-sec="3.0">
-                  奥へ通常 3s (2u/s)
-                </button>
-                <button type="button" class="btn-tactical" data-step-mode="run" data-step-dir="1" data-step-sec="1.2">
-                  奥へ走行 1.2s (4u/s)
-                </button>
-                <button type="button" class="btn-tactical" data-step-mode="slow" data-step-dir="-1" data-step-sec="2.0">
-                  入口へ低速 2s
-                </button>
-                <button type="button" class="btn-tactical" data-step-mode="normal" data-step-dir="-1" data-step-sec="3.0">
-                  入口へ通常 3s
-                </button>
-                <button type="button" class="btn-tactical" data-step-mode="run" data-step-dir="-1" data-step-sec="2.0">
-                  入口へ走行 2.0s (8m走行用)
-                </button>
-              `
-                  : trial.roomCode === 'T-309' && trial.whiteDoor.mainSectorOpened
-                  ? `
-                <button type="button" class="btn-tactical" id="btn-wd-forward">
-                  奥の接続室へ進む
-                </button>
-                <button type="button" class="btn-tactical" id="btn-wd-backward">
-                  手前の接続室／帰還扉へ戻る
-                </button>
-                <button type="button" class="btn-tactical" id="btn-wd-rope">
-                  ロープを辿って移動（位相変化後の検証）
-                </button>
-                <button type="button" class="btn-tactical" id="btn-wd-anchor">
-                  青い非常灯の固定点(0,0)に立つ
-                </button>
-                <button type="button" class="btn-tactical" id="btn-wd-wait-shift">
-                  固定点で待機して時間を進める (3s)
-                </button>
-                <button type="button" class="btn-tactical" id="btn-wd-step-off">
-                  固定点の外(端)へ移動する
-                </button>
-              `
-                  : `
-                <button type="button" class="btn-tactical" data-step-mode="normal" data-step-dir="1" data-step-sec="1.5">
-                  室内を移動 (WASD)
-                </button>
-              `
-              }
+            ${this.renderHoldMovementControls(trial)}
+            ${
+              trial.roomCode === 'T-309'
+                ? trial.whiteDoor.mainSectorOpened
+                  ? `<div class="control-group white-door-controls">
+                      <button type="button" class="btn-tactical" id="btn-wd-forward">奥の接続室へ進む</button>
+                      <button type="button" class="btn-tactical" id="btn-wd-backward">手前の接続室／帰還扉へ戻る</button>
+                      <button type="button" class="btn-tactical" id="btn-wd-rope">ロープを辿って移動</button>
+                    </div>`
+                  : '<p class="movement-help">前室では、右のオブジェクト一覧から時計・観測窓・白い扉を選んで操作します。</p>'
+                : ''
+            }
+            <div class="control-group view-controls">
               <button type="button" class="btn-tactical" id="btn-rotate-view">
-                視線の向きを反転 [Q/E]（速度不変）
+                視線を180度回す（Q / R: 約20度ずつ回転・速度不変）
               </button>
             </div>
+            ${
+              trial.roomCode === 'T-101'
+                ? `<details class="advanced-controls">
+                    <summary>検証用：時間を指定して移動（通常プレイでは不要）</summary>
+                    <div class="control-group">
+                      <button type="button" class="btn-tactical" data-step-mode="stop" data-step-dir="0" data-step-sec="0.6">停止 0.6s</button>
+                      <button type="button" class="btn-tactical" data-step-mode="slow" data-step-dir="1" data-step-sec="2.0">奥へ低速 2s</button>
+                      <button type="button" class="btn-tactical" data-step-mode="normal" data-step-dir="1" data-step-sec="3.0">奥へ通常 3s</button>
+                      <button type="button" class="btn-tactical" data-step-mode="run" data-step-dir="1" data-step-sec="1.2">奥へ走行 1.2s</button>
+                      <button type="button" class="btn-tactical" data-step-mode="slow" data-step-dir="-1" data-step-sec="2.0">入口へ低速 2s</button>
+                      <button type="button" class="btn-tactical" data-step-mode="normal" data-step-dir="-1" data-step-sec="3.0">入口へ通常 3s</button>
+                      <button type="button" class="btn-tactical" data-step-mode="run" data-step-dir="-1" data-step-sec="2.0">入口へ走行 2.0s</button>
+                    </div>
+                  </details>`
+                : trial.roomCode === 'T-204'
+                ? `<details class="advanced-controls">
+                    <summary>検証用：時間を指定して移動（通常プレイでは不要）</summary>
+                    <div class="control-group">
+                      <button type="button" class="btn-tactical" data-step-mode="normal" data-step-dir="1" data-step-sec="1.5">右へ通常 1.5s</button>
+                    </div>
+                  </details>`
+                : trial.whiteDoor.mainSectorOpened
+                ? `<details class="advanced-controls">
+                    <summary>検証用：位置と時間を直接操作（通常プレイでは不要）</summary>
+                    <div class="control-group">
+                      <button type="button" class="btn-tactical" id="btn-wd-anchor">青い非常灯の固定点(0,0)に立つ</button>
+                      <button type="button" class="btn-tactical" id="btn-wd-wait-shift">固定点で待機して時間を進める (3s)</button>
+                      <button type="button" class="btn-tactical" id="btn-wd-step-off">固定点の外(端)へ移動する</button>
+                    </div>
+                  </details>`
+                : ''
+            }
           </div>
         </div>
 
@@ -1316,10 +1507,11 @@ export class NeedToKnowApp {
                 activeInst?.id ?? ''
               }" ${activeInst?.questionAsked ? 'disabled' : ''}>4. 質問する(1回)</button>
             </div>
+            <p class="reply-note">返答するだけでは移動しません。指示された作業は、移動操作と室内オブジェクトで行います。</p>
           </div>
 
           <div class="interactables-box">
-            <div class="intercom-header">室内オブジェクト・調査アクション [F]</div>
+            <div class="intercom-header">室内オブジェクト・調査アクション [E / F]</div>
             <div class="obj-list">
               ${trial.interactables
                 .filter(
@@ -1336,7 +1528,7 @@ export class NeedToKnowApp {
                   <span class="obj-name">${iconSvg(OBJECT_ICONS[obj.id] ?? 'document', 22)}${this.escapeHtml(
                     obj.label
                   )}</span>
-                  <span class="obj-tag">${obj.inspected ? '調査済' : '調べる'}</span>
+                  <span class="obj-tag">${this.getObjectActionLabel(obj, trial)}</span>
                 </button>
               `
                 )
@@ -1551,6 +1743,58 @@ export class NeedToKnowApp {
     `;
   }
 
+  private renderHelpModal(): string {
+    return `
+      <div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="遊び方">
+        <div class="modal-window help-window">
+          <div class="modal-header">
+            <h3>遊び方・操作早見表</h3>
+            <button type="button" class="btn-terminal" id="btn-close-help">閉じる [H]</button>
+          </div>
+          <div class="help-grid">
+            <section>
+              <h4>1日の流れ</h4>
+              <ol class="help-flow">
+                <li><strong>朝:</strong> 会話・調査・物資交換を最大2行動。省略して召集へ進むこともできます。</li>
+                <li><strong>召集:</strong> 試験室と担当官を確認し、入室します。</li>
+                <li><strong>実験:</strong> 画面上部の割当作業とチェックリストを確認し、移動・調査・返答を行います。</li>
+                <li><strong>事後:</strong> 聴取への回答を選び、観測を整理します。</li>
+                <li><strong>夜:</strong> 仮説を記録し、必要な記録を封筒へ残して翌日へ進みます。</li>
+              </ol>
+            </section>
+            <section>
+              <h4>実験画面の見方</h4>
+              <ul class="help-list">
+                <li><strong>割当作業:</strong> 召集時に通達された作業と完了条件です。異常の回避法は表示しません。実験中にインターホンで追加される指示は右側に出ます。従うかどうかは自分で判断してください。</li>
+                <li><strong>室内オブジェクト:</strong> 「調べる」「回収」「面接を受ける」など、ボタンを押したときの動作を示します。</li>
+                <li><strong>知覚字幕:</strong> 足音・照明・機械音など、実際に知覚できた出来事です。</li>
+                <li><strong>返答:</strong> 「従う」を選んだだけでは移動しません。作業は移動操作とオブジェクトで行います。</li>
+              </ul>
+            </section>
+          </div>
+          <section class="help-controls-section">
+            <h4>基本操作</h4>
+            <div class="help-controls-grid">
+              <span><kbd>WASD</kbd> / 矢印</span><span>移動</span>
+              <span><kbd>Shift</kbd> / <kbd>Alt</kbd></span><span>保持中は走行 / 低速</span>
+              <span><kbd>C</kbd></span><span>低速歩行のON / OFF</span>
+              <span><kbd>Space</kbd></span><span>保持中は停止</span>
+              <span><kbd>E</kbd> / <kbd>F</kbd></span><span>最寄りのオブジェクトを調べる</span>
+              <span><kbd>Q</kbd> / <kbd>R</kbd></span><span>視線を約20度ずつ回転</span>
+              <span><kbd>1</kbd>〜<kbd>4</kbd></span><span>インターホンへ返答</span>
+              <span><kbd>N</kbd> / <kbd>P</kbd></span><span>ノート / 設定・ポーズ</span>
+              <span><kbd>H</kbd></span><span>この画面を開く・閉じる</span>
+            </div>
+            <p>画面上では、速度を選んで方向ボタンを押している間も移動できます。マウスをCanvas上で動かすと視線だけが変わります。</p>
+          </section>
+          <div class="tutorial-callout">
+            ノート・設定・この遊び方を開いている間は、実験時計と危険進行が止まります。実験中は2秒ごとに自動保存され、再読み込み後は一時停止状態から再開できます。
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   private renderOrientationModal(): string {
     return `
       <div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="配属時交付文書">
@@ -1590,7 +1834,7 @@ export class NeedToKnowApp {
               <input type="range" id="rng-volume" min="0" max="1" step="0.1" value="${
                 settings.volume
               }" />
-              <span>${Math.round(settings.volume * 100)}%</span>
+              <span id="volume-value">${Math.round(settings.volume * 100)}%</span>
             </label>
             <label class="setting-row">
               <span>開発検証用ログ表示（内部数値 C/S/E・Seed・変動パラメータを表示）:</span>
@@ -1638,6 +1882,7 @@ export class NeedToKnowApp {
       this.toggleNotebook();
     });
     document.getElementById('btn-open-archive')?.addEventListener('click', () => {
+      this.clearMovementInputs();
       this.archiveModalOpen = true;
       if (this.state.trial) setTrialPause(this.state.trial, 'pause_menu');
       this.renderUI();
@@ -1649,7 +1894,14 @@ export class NeedToKnowApp {
       }
       this.renderUI();
     });
+    document.getElementById('btn-open-help')?.addEventListener('click', () => {
+      this.toggleHelp();
+    });
+    document.getElementById('btn-close-help')?.addEventListener('click', () => {
+      this.toggleHelp();
+    });
     document.getElementById('btn-open-orientation')?.addEventListener('click', () => {
+      this.clearMovementInputs();
       this.orientationModalOpen = true;
       if (this.state.trial) setTrialPause(this.state.trial, 'pause_menu');
       this.renderUI();
@@ -1783,6 +2035,8 @@ export class NeedToKnowApp {
     // Briefing button
     document.getElementById('btn-enter-trial')?.addEventListener('click', () => {
       this.lastCueCount = 0;
+      this.clearMovementInputs();
+      this.selectedMoveMode = 'normal';
       startCurrentDayTrial(this.state);
       if (this.state.trial) {
         this.flushNewAudioCues(this.state.trial);
@@ -1801,7 +2055,64 @@ export class NeedToKnowApp {
       this.renderUI();
     });
 
-    // Trial tactical buttons
+    // Comfortable movement controls: choose a speed, then hold a direction or stop.
+    document.querySelectorAll<HTMLElement>('[data-move-speed]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const mode = btn.dataset.moveSpeed as Exclude<MoveMode, 'stop'>;
+        this.selectedMoveMode = mode;
+        if (this.state.trial) {
+          this.state.trial.player.slowToggle = mode === 'slow';
+        }
+        this.manualMoveOverride = null;
+        this.renderUI();
+      });
+    });
+
+    document.querySelectorAll<HTMLElement>('[data-hold-move-x]').forEach((btn) => {
+      btn.addEventListener('pointerdown', (e) => {
+        const trial = this.state.trial;
+        if (!trial || trial.status !== 'active') return;
+        e.preventDefault();
+        try {
+          btn.setPointerCapture(e.pointerId);
+        } catch {
+          // Pointer capture is optional; the global pointerup handler also clears movement.
+        }
+        this.manualMoveOverride = {
+          moveX: Number(btn.dataset.holdMoveX || '0'),
+          moveY: Number(btn.dataset.holdMoveY || '0'),
+          mode: this.selectedMoveMode,
+        };
+      });
+      btn.addEventListener('pointerup', (e) => {
+        this.manualMoveOverride = null;
+        if (btn.hasPointerCapture(e.pointerId)) btn.releasePointerCapture(e.pointerId);
+      });
+      btn.addEventListener('pointercancel', () => {
+        this.manualMoveOverride = null;
+      });
+      btn.addEventListener('lostpointercapture', () => {
+        this.manualMoveOverride = null;
+      });
+      btn.addEventListener('contextmenu', (e) => e.preventDefault());
+    });
+
+    document.querySelectorAll<HTMLElement>('[data-hold-stop]').forEach((btn) => {
+      btn.addEventListener('pointerdown', (e) => {
+        if (!this.state.trial || this.state.trial.status !== 'active') return;
+        e.preventDefault();
+        this.manualMoveOverride = { moveX: 0, moveY: 0, mode: 'stop' };
+      });
+      btn.addEventListener('pointerup', () => {
+        this.manualMoveOverride = null;
+      });
+      btn.addEventListener('pointercancel', () => {
+        this.manualMoveOverride = null;
+      });
+      btn.addEventListener('contextmenu', (e) => e.preventDefault());
+    });
+
+    // Verification presets used by the UI walkthrough.
     document.querySelectorAll('[data-step-mode]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const trial = this.state.trial;
@@ -2133,8 +2444,11 @@ export class NeedToKnowApp {
     });
     document.getElementById('rng-volume')?.addEventListener('input', (e) => {
       this.state.settings.volume = Number((e.target as HTMLInputElement).value);
+      const valueEl = document.getElementById('volume-value');
+      if (valueEl) valueEl.textContent = `${Math.round(this.state.settings.volume * 100)}%`;
+    });
+    document.getElementById('rng-volume')?.addEventListener('change', () => {
       this.autoSave();
-      this.renderUI();
     });
     document.getElementById('chk-devlog')?.addEventListener('change', (e) => {
       this.state.settings.devLogVisible = (e.target as HTMLInputElement).checked;

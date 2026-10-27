@@ -1102,3 +1102,266 @@ button:disabled {
 .sub-panel .scene-art {
   margin: 4px 0 10px;
 }
+
+/* Readability and comfortable controls */
+button:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
+}
+
+kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-accent);
+  border-bottom-width: 2px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  line-height: 1.5;
+}
+
+.day-flow-guide {
+  line-height: 1.7;
+}
+
+.controls-cheatsheet {
+  margin-top: 14px;
+  padding: 10px 12px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+}
+
+.controls-cheatsheet summary,
+.advanced-controls summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.cheatsheet-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px 14px;
+  margin-top: 12px;
+  font-size: 13px;
+}
+
+.controls-cheatsheet p,
+.movement-help,
+.reply-note {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.controls-cheatsheet p {
+  margin: 10px 0 0;
+}
+
+.trial-objective-panel {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(280px, 1.2fr);
+  gap: 8px 16px;
+  margin-bottom: 10px;
+  padding: 12px 14px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-left: 3px solid var(--accent-cyan);
+  border-radius: 4px;
+}
+
+.objective-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.objective-kicker {
+  color: var(--accent-cyan);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.objective-checklist {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.objective-checklist li {
+  padding: 4px 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.objective-checklist li.done {
+  color: #86efac;
+  border-color: #166534;
+}
+
+.objective-condition {
+  grid-column: 1 / -1;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.movement-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.movement-speed,
+.movement-pad,
+.white-door-controls,
+.view-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.movement-speed .ctrl-label {
+  width: auto;
+  margin: 0 4px 0 0;
+}
+
+.speed-btn.active {
+  background: #1d4ed8;
+  border-color: var(--accent-cyan);
+}
+
+.movement-pad {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(64px, 1fr));
+  width: min(100%, 330px);
+}
+
+.movement-pad-corridor {
+  width: 100%;
+  max-width: 520px;
+}
+
+.hold-move,
+.hold-stop {
+  min-height: 44px;
+  font-size: 14px;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.hold-stop {
+  border-color: var(--accent-amber);
+}
+
+.movement-help {
+  margin: 0;
+}
+
+.view-controls,
+.advanced-controls {
+  margin-top: 10px;
+}
+
+.advanced-controls {
+  padding-top: 8px;
+  border-top: 1px dashed var(--border-color);
+}
+
+.advanced-controls summary {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.advanced-controls[open] summary {
+  margin-bottom: 8px;
+  color: var(--text-main);
+}
+
+.reply-note {
+  margin: 8px 0 0;
+}
+
+.help-window {
+  max-width: 860px;
+}
+
+.help-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.help-grid h4,
+.help-controls-section h4 {
+  margin: 0 0 8px;
+  color: var(--accent-cyan);
+  font-size: 14px;
+}
+
+.help-flow,
+.help-list {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--text-main);
+  font-size: 13px;
+}
+
+.help-flow li,
+.help-list li {
+  margin-bottom: 8px;
+}
+
+.help-controls-section {
+  margin: 16px 0;
+}
+
+.help-controls-grid {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 7px 16px;
+  align-items: center;
+  font-size: 13px;
+}
+
+@media (max-width: 860px) {
+  .trial-objective-panel,
+  .help-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .trial-status-bar,
+  .trial-resume-banner,
+  .modal-header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .trial-resume-banner .btn-primary {
+    width: 100%;
+  }
+
+  .btn-tactical,
+  .btn-terminal,
+  .btn-reply,
+  .btn-obj {
+    min-height: 42px;
+  }
+
+  .help-controls-grid {
+    gap: 7px 10px;
+  }
+}
