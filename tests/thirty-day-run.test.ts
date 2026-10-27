@@ -205,7 +205,7 @@ describe('30日間ラン', () => {
     proceedFromNightToNextDay(state);
     expect(state.cycle.phase).toBe('morning_comparison');
     const firstMsg = handleComparisonInterviewAction(state, 'cooperate_answer');
-    expect(firstMsg).toContain('C+1');
+    expect(firstMsg).toContain('信用+1');
     expect(state.subject.C).toBe(1);
 
     state.cycle.day = 12;
@@ -219,7 +219,7 @@ describe('30日間ラン', () => {
     proceedFromNightToNextDay(state);
     expect(state.cycle.phase).toBe('morning_comparison');
     const secondMsg = handleComparisonInterviewAction(state, 'cooperate_answer');
-    expect(secondMsg).toContain('C+1');
+    expect(secondMsg).toContain('信用+1');
     expect(state.subject.C).toBe(1);
   });
 

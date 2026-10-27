@@ -100,7 +100,7 @@ export function createTrial(
         deadline: 120,
         objective: '奥の回収箱を拾って入口へ戻る',
         completionCondition: '回収箱を所持して入口（0m地点）へ到達',
-        failureOutcome: '業務未達（C-1）',
+        failureOutcome: '業務未達（信用-1）',
         questionResponse:
           researcher === 'Researcher-A'
             ? '「手順書通りです。余計な確認は不要です……あ、マイク入ってるか。床の印は気にするな。」'
@@ -119,7 +119,7 @@ export function createTrial(
         deadline: 120,
         objective: '赤線（16m）〜青線（8m）の8m区間を走行する',
         completionCondition: '帰路の16m〜8m区間で走行移動を8距離単位行う',
-        failureOutcome: '追加指示未達（C-1）',
+        failureOutcome: '追加指示未達（信用-1）',
         questionResponse:
           researcher === 'Researcher-A'
             ? '「いいから走れと言っています。……高速移動時の追従データを取るだけだ。」'
@@ -249,7 +249,7 @@ export function createTrial(
         deadline: 120,
         objective: '支給名札を着けて面接を受け、返却トレイに名札を戻して退出する',
         completionCondition: '面接完了かつ名札返却後に退出',
-        failureOutcome: '業務未達（C-1）',
+        failureOutcome: '業務未達（信用-1）',
         questionResponse:
           researcher === 'Researcher-A'
             ? '「番号が違う？ 構いません、そのまま着けて窓口へ出てください。」'
@@ -396,7 +396,7 @@ export function createTrial(
       deadline: 180,
       objective: '室Pの記録板を回収して室Eの入口へ帰還する',
       completionCondition: '記録板を所持して室Eの帰還扉から前室へ戻る',
-      failureOutcome: '回収失敗・搬出（C-1）',
+      failureOutcome: '回収失敗・搬出（信用-1）',
       questionResponse:
         researcher === 'Researcher-B'
           ? '「前室の観測窓と時刻読み上げは安全に確認できます。本区画を開いた時点から180秒を計測します。」'
@@ -1265,7 +1265,7 @@ export function interactWithTrialObject(
       subject.rewardedEventKeys.push(rewardKey);
       trial.pendingSuspicionDelta += 1;
     }
-    return '稼働中の監視カメラ [CAM-204] の前で無許可キャビネットを開き、黒塗り文書『対象T-204：認知標識の残留と生体認証の分離』を閲覧した（カメラ記録により疑念 S+1）。';
+    return '稼働中の監視カメラ [CAM-204] の前で無許可キャビネットを開き、黒塗り文書『対象T-204：認知標識の残留と生体認証の分離』を閲覧した（カメラ記録により疑念+1）。';
   }
 
   // T-309 Objects
@@ -1327,5 +1327,5 @@ export function performBadgeReverification(
       : subject.badgeTargetStatus;
   subject.badgeEffectUntilDay = null;
   recordSubjectObservation(subject, 'ev-t204-human-vs-machine', trial?.day ?? 2, 'T-204');
-  return `処遇票の名札番号と自身の元の番号（${subject.originalNumber}）の不一致を提示し、機械端末で無料の再照合を受けた。翌朝の危険割当対象が訂正・解除された（異議申立による疑念Sの加算なし）。`;
+  return `処遇票の名札番号と自身の元の番号（${subject.originalNumber}）の不一致を提示し、機械端末で無料の再照合を受けた。翌朝の危険割当対象が訂正・解除された（異議を申し立てても疑念は上がらない）。`;
 }

@@ -394,39 +394,39 @@ export function getDebriefChoices(roomCode: RoomCode): DebriefChoice[] {
       id: 'choice-grounded',
       label: `${specific.label}（自身の観測記録に基づく説明）`,
       category: 'grounded_observation',
-      description: 'この被験者自身が観測・記録した知覚事実のみを報告する（疑念S 変化なし）',
+      description: '自分で観測して記録した事実だけを話す（疑念は上がらない）',
       requiresEvidenceId: specific.reqId,
     },
     {
       id: 'choice-excuse',
       label: '「足が痛くて遅れた／手順の確認に手間取った」',
       category: 'excuse',
-      description: '身体の不調や不慣れを理由にする（目的達成済みならC変化なし、未達ならC-1、S変化なし）',
+      description: '体調や不慣れのせいにする（作業を終えていれば信用は変わらない。未達なら信用-1。疑念は上がらない）',
     },
     {
       id: 'choice-unfounded-boast',
       label: '「実験の条件は全部知っている」（知識の誇示）',
       category: 'unfounded_secret',
-      description: '異常の仕組みを既に把握していると断言する（現人物に根拠記録がない場合 S+1）',
+      description: '仕組みを全部知っていると言い張る（自分の観測記録が根拠になければ疑念+1）',
     },
     {
       id: 'choice-silent',
       label: '「……（話さない）」',
       category: 'silent',
-      description: '質問に対して沈黙を保つ（S変化なし。業務未達ならC-1）',
+      description: '何も話さない（疑念は上がらない。作業が未達なら信用-1）',
     },
     {
       id: 'choice-submit-memo',
       label: '「隠しメモ・封筒の記録を任意提出する」',
       category: 'submit_hidden_memo',
-      description: '寝台下の封筒または引き継ぎメモを提出して協力を示す（C+1、S+1、封筒メモ没収。1試験1回まで）',
+      description: '封筒やメモを差し出して協力を示す（信用+1・疑念+1。封筒のメモは没収。1回の試験で1度まで）',
       requiresEnvelopeOrNote: true,
     },
     {
       id: 'choice-quote-unauthorized',
       label: '「黒塗り機密文書の内部規定について言及する」',
       category: 'quote_unauthorized_doc',
-      description: '無許可で閲覧した機密文書の内容を話す（無許可閲覧を根拠として S+1）',
+      description: '無許可で読んだ機密文書の内容を話す（疑念+1）',
       requiresUnauthorizedDoc: true,
     },
   ];
@@ -458,7 +458,7 @@ export const ENDING_DESCRIPTIONS: Record<
     summary:
       '16日目・30日目の指定評価業務を同一人物で完遂し、高い信用と低い疑念を維持したため翌月への継続配属が決定した。',
     detail:
-      '「区画定期評価通知：被験者は危険環境下での高い業務遂行能力（E=2）と従順な協力姿勢（C>=2）、および保安上の低リスク（S<=1）を実証した。よって月末の除籍処理を免除し、専属検証要員として次期サイクルへ継続配属する。」\n\n貴殿は生き延びた。ただしそれは自由ではなく、「使える消耗品」として次の実験リストへ名前が載り続けることを意味する。',
+      '「区画定期評価通知：被験者は危険環境下での高い業務遂行能力（評価2回）と従順な協力姿勢（信用2以上）、および保安上の低リスク（疑念1以下）を実証した。よって月末の除籍処理を免除し、専属検証要員として次期サイクルへ継続配属する。」\n\n貴殿は生き延びた。ただしそれは自由ではなく、「使える消耗品」として次の実験リストへ名前が載り続けることを意味する。',
   },
   termination_standard: {
     title: '終了分岐 4：処分',

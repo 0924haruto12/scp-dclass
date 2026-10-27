@@ -334,6 +334,8 @@ export interface GameState {
     subtitlesOn: boolean;
     volume: number; // 0..1
     devLogVisible: boolean;
+    /** Show credit/suspicion/evaluation as meters. Undefined (older saves) means on. */
+    statusMeters?: boolean;
   };
   corruptedSaveNotice: string | null;
   lastActionLog: string[];

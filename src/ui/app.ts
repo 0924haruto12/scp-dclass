@@ -59,6 +59,34 @@ import {
 } from '../render/art';
 import { TrialCanvasRenderer } from '../render/canvasRenderer';
 
+/** What the last morning/night/debrief action did, shown at the top of the next screen. */
+interface ActionFeedback {
+  title: string;
+  lines: string[];
+  changes: Array<{ text: string; tone: 'good' | 'bad' | 'neutral' }>;
+}
+
+interface FeedbackSnapshot {
+  subjectId: string;
+  C: number;
+  S: number;
+  E: number;
+  inventory: OptionalItemId[];
+  supervisorBadge: boolean;
+  observations: number;
+  rumors: number;
+  envelope: number;
+  logLength: number;
+}
+
+const DAY_STEPS: Array<{ label: string; phases: GameState['cycle']['phase'][] }> = [
+  { label: '朝', phases: ['morning', 'morning_comparison'] },
+  { label: '召集', phases: ['briefing'] },
+  { label: '実験', phases: ['trial'] },
+  { label: '聴取・報告', phases: ['debrief', 'death_report'] },
+  { label: '夜', phases: ['night'] },
+];
+
 export class NeedToKnowApp {
   private root: HTMLElement;
   private state: GameState;
@@ -74,6 +102,7 @@ export class NeedToKnowApp {
   private settingsModalOpen = false;
   private orientationModalOpen = false;
   private helpModalOpen = false;
+  private lastResult: ActionFeedback | null = null;
 
   // Real-time input states for Trial
   private keysDown = new Set<string>();
@@ -104,6 +133,204 @@ export class NeedToKnowApp {
     this.setupGlobalListeners();
     this.renderUI();
     this.startLoop();
+  }
+
+  private statusMetersOn(): boolean {
+    return this.state.settings.statusMeters !== false;
+  }
+
+  private snapshotForFeedback(): FeedbackSnapshot {
+    const { subject, cycle } = this.state;
+    return {
+      subjectId: subject.subjectId,
+      C: subject.C,
+      S: subject.S,
+      E: subject.E,
+      inventory: [...subject.inventory],
+      supervisorBadge: subject.hasSupervisorBadge,
+      observations: subject.portableNote.observations.filter((o) => !o.erased).length,
+      rumors: subject.portableNote.rumors.filter((r) => !r.erased).length,
+      envelope: cycle.envelope.length,
+      logLength: this.state.lastActionLog.length,
+    };
+  }
+
+  /**
+   * Runs a non-trial action and records what it changed, so the result appears
+   * where the player is looking instead of only in the log at the bottom.
+   */
+  private runAction(title: string, action: () => void): void {
+    const before = this.snapshotForFeedback();
+    action();
+    const after = this.snapshotForFeedback();
+    const log = this.state.lastActionLog;
+    const lines = log.length > before.logLength ? log.slice(before.logLength) : [];
+    const changes: ActionFeedback['changes'] = [];
+
+    if (before.subjectId !== after.subjectId) {
+      changes.push({ text: `新しい被験者 ${after.subjectId} が配属`, tone: 'neutral' });
+    } else {
+      if (this.statusMetersOn()) {
+        const delta = (label: string, diff: number, goodWhenUp: boolean) => {
+          if (diff === 0) return;
+          changes.push({
+            text: `${label} ${diff > 0 ? '+' : ''}${diff}`,
+            tone: diff > 0 === goodWhenUp ? 'good' : 'bad',
+          });
+        };
+        delta('信用', after.C - before.C, true);
+        delta('疑念', after.S - before.S, false);
+        delta('評価', after.E - before.E, true);
+      }
+      for (const item of after.inventory.filter((i) => !before.inventory.includes(i))) {
+        changes.push({ text: `入手: ${OPTIONAL_ITEM_LABELS[item].name}`, tone: 'good' });
+      }
+      for (const item of before.inventory.filter((i) => !after.inventory.includes(i))) {
+        changes.push({ text: `手放した: ${OPTIONAL_ITEM_LABELS[item].name}`, tone: 'neutral' });
+      }
+      if (after.observations > before.observations) {
+        changes.push({ text: `観測カード +${after.observations - before.observations}（ノートに記録）`, tone: 'good' });
+      } else if (after.observations < before.observations) {
+        changes.push({ text: `観測カード ${after.observations - before.observations}（記憶処理で消去）`, tone: 'bad' });
+      }
+      if (after.rumors > before.rumors) {
+        changes.push({ text: `伝聞カード +${after.rumors - before.rumors}（ノートに記録）`, tone: 'good' });
+      }
+      if (!before.supervisorBadge && after.supervisorBadge) {
+        changes.push({ text: '監督用名札を入手', tone: 'good' });
+      }
+    }
+    if (after.envelope !== before.envelope) {
+      changes.push({ text: `封筒 ${before.envelope} → ${after.envelope} 件`, tone: 'neutral' });
+    }
+
+    this.lastResult = lines.length > 0 || changes.length > 0 ? { title, lines, changes } : null;
+    this.autoSave();
+    this.renderUI();
+  }
+
+  private renderResultCard(): string {
+    const result = this.lastResult;
+    const phase = this.state.cycle.phase;
+    if (!result || !['morning', 'morning_comparison', 'night'].includes(phase)) return '';
+    return `
+      <section class="result-card" role="status" aria-live="polite" aria-label="直前の行動の結果">
+        <div class="result-head">
+          <span class="result-kicker">結果</span>
+          <strong>${this.escapeHtml(result.title)}</strong>
+          <button type="button" class="result-dismiss" id="btn-dismiss-result" aria-label="結果を閉じる">×</button>
+        </div>
+        ${result.lines.map((line) => `<p class="result-line">${this.escapeHtml(line)}</p>`).join('')}
+        ${
+          result.changes.length > 0
+            ? `<ul class="result-changes">${result.changes
+                .map((c) => `<li class="change-${c.tone}">${this.escapeHtml(c.text)}</li>`)
+                .join('')}</ul>`
+            : ''
+        }
+      </section>
+    `;
+  }
+
+  private renderDayTracker(): string {
+    const { phase, day } = this.state.cycle;
+    if (phase === 'title' || phase === 'ending' || phase === 'final_eval') return '';
+    const currentIndex = DAY_STEPS.findIndex((step) => step.phases.includes(phase));
+    const remaining = RUN_LENGTH_DAYS - day;
+    return `
+      <nav class="day-tracker" aria-label="1日の進行">
+        <div class="run-progress">
+          <span class="run-progress-label">${
+            remaining > 0 ? `月末まで残り ${remaining} 日` : '最終評価日'
+          }</span>
+          <span class="run-bar" aria-hidden="true"><span style="width:${Math.round(
+            (day / RUN_LENGTH_DAYS) * 100
+          )}%"></span></span>
+          <span class="run-goal">目標: 30日目まで生き延びる</span>
+        </div>
+        <ol class="phase-steps">
+          ${DAY_STEPS.map((step, i) => {
+            const state = i < currentIndex ? 'done' : i === currentIndex ? 'current' : '';
+            return `<li class="${state}" ${i === currentIndex ? 'aria-current="step"' : ''}>${step.label}</li>`;
+          }).join('')}
+        </ol>
+      </nav>
+    `;
+  }
+
+  /** Renders a facility report as a paper document: high-contrast, sectioned, readable. */
+  private renderReportDoc(doc: {
+    kicker: string;
+    stamp?: { text: string; tone: 'red' | 'amber' | 'gray' | 'blue' };
+    meta: Array<[string, string]>;
+    sections: Array<{ heading: string; paragraphs: string[] }>;
+    redaction?: string;
+    label: string;
+  }): string {
+    return `
+      <article class="report-doc" aria-label="${this.escapeHtml(doc.label)}">
+        <header class="report-doc-head">
+          <span class="report-doc-kicker">${this.escapeHtml(doc.kicker)}</span>
+          ${
+            doc.stamp
+              ? `<span class="report-stamp report-stamp-${doc.stamp.tone}">${this.escapeHtml(doc.stamp.text)}</span>`
+              : ''
+          }
+        </header>
+        ${
+          doc.meta.length > 0
+            ? `<dl class="report-meta">${doc.meta
+                .map(([k, v]) => `<div><dt>${this.escapeHtml(k)}</dt><dd>${this.escapeHtml(v)}</dd></div>`)
+                .join('')}</dl>`
+            : ''
+        }
+        ${doc.sections
+          .map(
+            (section) => `
+          <section class="report-section">
+            <h3>${this.escapeHtml(section.heading)}</h3>
+            ${section.paragraphs
+              .filter((para) => para.trim().length > 0)
+              .map((para) => `<p>${this.escapeHtml(para)}</p>`)
+              .join('')}
+          </section>`
+          )
+          .join('')}
+        ${
+          doc.redaction
+            ? `<p class="report-redaction">内部分類規定: <span class="redact-bar" aria-label="黒塗り"></span>${this.escapeHtml(
+                doc.redaction
+              )}</p>`
+            : ''
+        }
+      </article>
+    `;
+  }
+
+  private renderStatusMeter(
+    label: string,
+    value: number,
+    max: number,
+    kind: 'credit' | 'suspicion' | 'evaluation',
+    description: string,
+    hint: string,
+    warn = false
+  ): string {
+    const meters = this.statusMetersOn();
+    return `
+      <div class="status-cell status-${kind}">
+        <span class="status-label">${label}${
+          meters
+            ? `<span class="status-pips" role="img" aria-label="${label} ${value} / ${max}">${Array.from(
+                { length: max },
+                (_, i) => `<span class="pip ${i < value ? 'on' : ''}"></span>`
+              ).join('')}</span>`
+            : ''
+        }</span>
+        <span class="status-val ${warn ? 'text-warn' : ''}">${this.escapeHtml(description)}</span>
+        ${meters ? `<span class="status-hint">${hint}</span>` : ''}
+      </div>
+    `;
   }
 
   public getState(): GameState {
@@ -428,7 +655,7 @@ export class NeedToKnowApp {
         ? '標準＋追加配給札（協力記録良好）'
         : C === 1
         ? '標準配給札'
-        : '最低限配給（非協力的記録あり）';
+        : '最低限配給（協力記録なし）';
 
     const securityStatus =
       S >= 3 || this.state.subject.pendingMemoryTreatment
@@ -440,11 +667,7 @@ export class NeedToKnowApp {
         : '通常監視（特記事項なし）';
 
     const evalStatus =
-      E >= 2
-        ? '役割評価：2回達成（有用認定候補）'
-        : E === 1
-        ? '役割評価：1回達成'
-        : '役割評価：未達成';
+      E >= 2 ? '指定業務 2回達成（有用認定候補）' : E === 1 ? '指定業務 1回達成' : '指定業務 未達成';
 
     return { rationStatus, securityStatus, evalStatus };
   }
@@ -595,22 +818,33 @@ export class NeedToKnowApp {
         }
 
         <section class="ntk-status-strip" aria-label="被験者処遇・観測状態">
+          ${this.renderStatusMeter(
+            '信用',
+            subject.C,
+            3,
+            'credit',
+            rationStatus,
+            '協力すると上がる。2以上で有用認定・監督用名札の条件'
+          )}
+          ${this.renderStatusMeter(
+            '疑念',
+            subject.S,
+            3,
+            'suspicion',
+            securityStatus,
+            '知りすぎると上がる。3で記憶処理（ノートが消える）',
+            subject.S >= 2
+          )}
+          ${this.renderStatusMeter(
+            '評価',
+            subject.E,
+            2,
+            'evaluation',
+            evalStatus,
+            '16日目・30日目の指定業務を果たすと上がる'
+          )}
           <div class="status-cell">
-            <span class="status-label">配給・協力記録:</span>
-            <span class="status-val">${this.escapeHtml(rationStatus)}</span>
-          </div>
-          <div class="status-cell">
-            <span class="status-label">保安監視状態:</span>
-            <span class="status-val ${subject.S >= 2 ? 'text-warn' : ''}">${this.escapeHtml(
-              securityStatus
-            )}</span>
-          </div>
-          <div class="status-cell">
-            <span class="status-label">業務評価記録:</span>
-            <span class="status-val">${this.escapeHtml(evalStatus)}</span>
-          </div>
-          <div class="status-cell">
-            <span class="status-label">持込品(最大2):</span>
+            <span class="status-label">持込品（最大2）</span>
             <span class="status-val">${
               subject.inventory.length > 0
                 ? subject.inventory
@@ -642,7 +876,10 @@ export class NeedToKnowApp {
           }
         </section>
 
+        ${this.renderDayTracker()}
+
         <main class="ntk-main">
+          ${this.renderResultCard()}
           ${this.renderPhaseContent()}
         </main>
 
@@ -781,7 +1018,7 @@ export class NeedToKnowApp {
             <button type="button" class="btn-primary" id="btn-comp-cooperate">
               自分の登録番号（${this.escapeHtml(
                 subject.originalNumber
-              )}）を答え、安全協力課題に応答する（安全な協力課題により C+1 → 確実に残留）
+              )}）を答え、安全協力課題に応答する（安全な協力課題により信用+1 → 確実に残留）
             </button>
             ${
               !comp?.silentWarningShown
@@ -835,7 +1072,7 @@ export class NeedToKnowApp {
               )}（危険割当対象）」になっています！<br>
               手元の処遇票と自分の番号（${this.escapeHtml(
                 subject.originalNumber
-              )}）の不一致を提示し、機械端末で無料の再照合を受ければ訂正できます（疑念S加算なし）。
+              )}）の不一致を提示し、機械端末で無料の再照合を受ければ訂正できます（疑念は上がらない）。
               <div style="margin-top:8px;">
                 <button type="button" class="btn-primary" id="btn-morning-reverify-badge">
                   処遇票の不一致を見せて無料の再照合を受ける（危険割当を訂正）
@@ -868,7 +1105,7 @@ export class NeedToKnowApp {
                     ? 'disabled'
                     : ''
                 }>
-                  給水器の水を飲む（サンプル協力 C+1）
+                  給水器の水を飲む（サンプル協力 信用+1）
                 </button>
                 <button type="button" class="btn-secondary" id="btn-water-skip" ${
                   cycle.processedEventIds.includes(
@@ -1043,14 +1280,26 @@ export class NeedToKnowApp {
       return `
         <div class="phase-card debrief-card">
           <h2>【生還・事後聴取】試験室 ${trial.roomCode} 退室後レビュー</h2>
-          <p class="clinical-note">
-            試験結果: <strong>${
-              trial.status === 'survived' ? '目的達成・生還' : '制限時間超過・回収班介入（業務未達）'
-            }</strong><br>
-            事後記録断片: 「${this.escapeHtml(
-              this.state.reportArchive[this.state.reportArchive.length - 1]?.fragmentText ?? ''
-            )}」
-          </p>
+          ${this.renderReportDoc({
+            label: '試験記録',
+            kicker: '試験記録 — 退室後レビュー',
+            stamp:
+              trial.status === 'survived'
+                ? { text: '生還', tone: 'blue' }
+                : { text: '業務未達', tone: 'amber' },
+            meta: [
+              ['試験室', trial.roomCode],
+              ['実施日', `第${cycle.day}日`],
+              ['被験者', subject.subjectId],
+              ['結果', trial.status === 'survived' ? '作業を終えて生還' : '時間切れ・回収班が介入'],
+            ],
+            sections: [
+              {
+                heading: '試験室の記録',
+                paragraphs: [this.state.reportArchive[this.state.reportArchive.length - 1]?.fragmentText ?? ''],
+              },
+            ],
+          })}
 
           ${
             trial.roomCode === 'T-204' &&
@@ -1075,6 +1324,7 @@ export class NeedToKnowApp {
             'intercom',
             22
           )}担当官からの聴取：「試験室での停止や行動の理由を説明してください」</h3>
+          <p class="debrief-guide">答え方で信用と疑念が変わります。自分で観測した事実に基づく説明なら、疑われません。</p>
           <div class="debrief-choices">
             ${choices
               .map((c) => {
@@ -1094,9 +1344,18 @@ export class NeedToKnowApp {
                   disabled ? 'disabled' : ''
                 }>
                     <div class="choice-title">${this.escapeHtml(c.label)}</div>
-                    <div class="choice-desc">${this.escapeHtml(c.description)}${
-                  disabled ? ' ［条件未充足：該当する観測記録や文書を所持していません］' : ''
-                }</div>
+                    <div class="choice-desc">${this.escapeHtml(c.description)}</div>
+                    ${
+                      disabled
+                        ? `<div class="choice-locked">${
+                            !hasEvidence
+                              ? 'この試験で根拠になる出来事を観測していないため選べません'
+                              : !hasMemo
+                              ? '封筒の記録も観測カードもないため選べません'
+                              : '機密文書を読んでいないため選べません'
+                          }</div>`
+                        : ''
+                    }
                   </button>
                 `;
               })
@@ -1108,40 +1367,65 @@ export class NeedToKnowApp {
 
     if (cycle.phase === 'death_report') {
       const latestReport = this.state.reportArchive[this.state.reportArchive.length - 1];
+      const isFinalDay = cycle.day >= RUN_LENGTH_DAYS;
+      const roomCode = this.state.trial?.roomCode ?? latestReport?.roomCode ?? '—';
       return `
         <div class="phase-card death-card">
-          <div class="phase-figure-row">
-            ${iconSvg('report', 48, { className: 'phase-figure' })}
-            <div class="dossier-stamp stamp-danger">SUBJECT TERMINATED // DECEASED</div>
-          </div>
           <h2>【事後報告書（死亡除籍記録）】被験者 ${this.escapeHtml(subject.subjectId)}</h2>
-          <div class="clinical-report-box">
-            <p><strong>施設コード:</strong> ${this.escapeHtml(cycle.cycleId)} ／ <strong>発生日:</strong> 第 ${
-        cycle.day
-      } 日</p>
-            <p><strong>死因・反応消失記録:</strong> ${this.escapeHtml(
-              this.state.trial?.deathCause ?? '比較面接における移送除籍処理'
-            )}</p>
-            <p><strong>事後報告書断片 (L4):</strong><br>${this.escapeHtml(
-              latestReport?.fragmentText ?? ''
-            )}</p>
-            <p class="redacted-line">内部分類規定: ██████████ 対象の基礎規則は当サイクル中変更なし。</p>
-          </div>
-          <p class="inheritance-note">
+          ${this.renderReportDoc({
+            label: '事後報告書',
+            kicker: '事後報告書 — 死亡除籍記録',
+            stamp: { text: '除籍', tone: 'red' },
+            meta: [
+              ['施設コード', cycle.cycleId],
+              ['発生日', `第${cycle.day}日`],
+              ['試験室', roomCode],
+              ['被験者', subject.subjectId],
+            ],
+            sections: [
+              {
+                heading: '死因',
+                paragraphs: [this.state.trial?.deathCause ?? '比較面接における移送除籍処理'],
+              },
+              { heading: '試験室の記録', paragraphs: [latestReport?.fragmentText ?? ''] },
+            ],
+            redaction: '対象の基礎規則は当サイクル中変更なし。',
+          })}
+          <section class="carryover-panel" aria-label="次の被験者へ引き継がれるもの">
             ${
-              cycle.day < RUN_LENGTH_DAYS
-                ? `※死亡した日は再実験せず、日付が1日だけ進みます（第${
-                    cycle.day + 1
-                  }日の朝へ）。施設の異常パラメータと寝台下の封筒（現在 ${
-                    cycle.envelope.length
-                  } 件）はそのまま残り、次のDクラス被験者が配属されます。`
-                : '※30日目（最終評価日）の死亡のため、欠員補充は停止されサイクル終了となります。'
+              isFinalDay
+                ? `<h3>サイクル終了</h3>
+                   <p>30日目（最終評価日）の死亡のため、欠員補充は停止され、このサイクルは終了します。</p>`
+                : `<h3>第${cycle.day + 1}日の朝、次の被験者が配属されます</h3>
+                   <div class="carryover-grid">
+                     <div class="carryover-keep">
+                       <h4>残るもの</h4>
+                       <ul>
+                         <li>寝台下の封筒（${cycle.envelope.length}件）</li>
+                         <li>施設の異常のルール（このサイクル中は変わらない）</li>
+                         <li>事後報告履歴（あなたが振り返るための記録）</li>
+                       </ul>
+                     </div>
+                     <div class="carryover-lost">
+                       <h4>失われるもの</h4>
+                       <ul>
+                         <li>携帯ノートの記録</li>
+                         <li>信用・疑念・評価</li>
+                         <li>持込品と名札の効果</li>
+                       </ul>
+                     </div>
+                   </div>
+                   ${
+                     cycle.envelope.length === 0
+                       ? '<p class="carryover-tip">ヒント: 夜に携帯ノートの記録を封筒へ複写しておくと、次の被験者が朝に読めます。</p>'
+                       : ''
+                   }`
             }
-          </p>
+          </section>
           <div class="proceed-bar">
             <button type="button" class="btn-primary" id="btn-proceed-death">
               ${
-                cycle.day < RUN_LENGTH_DAYS
+                !isFinalDay
                   ? `翌朝（第 ${cycle.day + 1} 日）の新被験者配属へ進む`
                   : '終了判定（処分・欠員補充停止）へ進む'
               }
@@ -1205,13 +1489,13 @@ export class NeedToKnowApp {
             <div class="sub-panel">
               <h3>2. 安全な再評価業務・同房者会話（各1枠）</h3>
               <p>
-                <strong>安全な再評価業務:</strong> 備品点検と定型票提出を行い、信用を回復（C+1）し疑念を緩和（S-1）します。
+                <strong>安全な再評価業務:</strong> 備品点検と定型票提出を行い、信用を1回復し、疑念を1下げます。
               </p>
               ${
                 nightSched.hasSafeReevalUnlock
                   ? `<div class="panel-figure unlock-note">
                       ${iconSvg('supervisor_badge', 40, { className: 'panel-figure-icon' })}
-                      <p><strong>※${cycle.day}日目特別条件:</strong> 完了後に C>=2 かつ S<=1 を満たすと、翌朝使える「監督用名札」が支給されます！</p>
+                      <p><strong>※${cycle.day}日目特別条件:</strong> 完了後に信用2以上・疑念1以下なら、翌朝使える「監督用名札」が支給されます！</p>
                     </div>`
                   : ''
               }
@@ -1221,7 +1505,7 @@ export class NeedToKnowApp {
                   ? 'disabled'
                   : ''
               }>
-                安全な再評価業務を実施する（1枠：C+1, S-1）
+                安全な再評価業務を実施する（1枠：信用+1・疑念-1）
               </button>
               <div style="margin-top:10px;">
                 <button type="button" class="btn-secondary" id="btn-night-talk-cm" ${
@@ -1257,27 +1541,31 @@ export class NeedToKnowApp {
           </div>
           ${iconSvg(endVisual.icon, 56, { className: 'ending-hero-icon' })}
         </div>
-        <div class="clinical-report-box" style="white-space:pre-line;">${this.escapeHtml(
-          endDesc.detail
-        )}</div>
-        <div class="dossier-table" style="margin-top:14px;">
-          <div class="dossier-row">
-            <span>最終到達被験者</span>
-            <strong>${this.escapeHtml(subject.subjectId)}</strong>
-          </div>
-          <div class="dossier-row">
-            <span>最終評価指標（開示）</span>
-            <strong>役割評価 E=${subject.E} / 信用 C=${subject.C} / 疑念 S=${subject.S}</strong>
-          </div>
-          <div class="dossier-row">
-            <span>当該サイクルの異常パラメータ（開示）</span>
-            <strong>T-101許容速度=${cycle.fixedParams.gaitAllowedSpeed} | T-204対象処遇=${
-      cycle.fixedParams.badgeTargetFate
-    } | W-00遅延=${cycle.fixedParams.waterCoolerDelayDays}日 | T-309時間倍率=r${
-      cycle.fixedParams.whiteDoorTimeRatio
-    }</strong>
-          </div>
-        </div>
+        ${this.renderReportDoc({
+          label: '区画定期評価の最終記録',
+          kicker: `区画定期評価 — ${endDesc.code}`,
+          meta: [
+            ['施設コード', cycle.cycleId],
+            ['最終到達被験者', subject.subjectId],
+            ['信用', `${subject.C} / 3`],
+            ['疑念', `${subject.S} / 3`],
+            ['評価', `${subject.E} / 2`],
+          ],
+          sections: [
+            { heading: '評価通知', paragraphs: endDesc.detail.split(/\n\n+/) },
+            {
+              heading: 'このサイクルの異常の設定（終了時に開示）',
+              paragraphs: [
+                `T-101 許容速度: ${cycle.fixedParams.gaitAllowedSpeed} u/s`,
+                `T-204 名札の対象の処遇: ${
+                  cycle.fixedParams.badgeTargetFate === 'hazard_assignment' ? '危険割当' : '配給優遇'
+                }`,
+                `W-00 給水器の遅延: ${cycle.fixedParams.waterCoolerDelayDays}日`,
+                `T-309 内部時間の倍率: ${cycle.fixedParams.whiteDoorTimeRatio}倍`,
+              ],
+            },
+          ],
+        })}
         <div class="proceed-bar">
           <button type="button" class="btn-primary" id="btn-ending-new-cycle">
             新サイクルを開始する（新Seedで変動パラメータ再抽選・事後報告履歴を継承）
@@ -1684,7 +1972,7 @@ export class NeedToKnowApp {
                 </label>
                 <label>
                   <span>自由メモ:</span>
-                  <textarea id="hyp-freenote" rows="3" placeholder="研究員の指示との矛盾や次の検証手順を自由に記入（何書いても疑念Sは上がりません）">${this.escapeHtml(
+                  <textarea id="hyp-freenote" rows="3" placeholder="研究員の指示との矛盾や次の検証手順を自由に記入（何を書いても疑念は上がりません）">${this.escapeHtml(
                     currentHyp.freeNote
                   )}</textarea>
                 </label>
@@ -1705,36 +1993,41 @@ export class NeedToKnowApp {
       <div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="事後報告履歴">
         <div class="modal-window">
           <div class="modal-header">
-            <h3 class="heading-with-icon">${iconSvg('report', 22)}事後報告履歴 ［プレイヤー向け閲覧画面・被験者の所持文書ではありません］</h3>
+            <h3 class="heading-with-icon">${iconSvg('report', 22)}事後報告履歴</h3>
             <button type="button" class="btn-terminal" id="btn-close-archive">閉じる</button>
           </div>
-          <p class="clinical-note">
-            ※この画面はプレイヤー自身の記憶・履歴確認用です。新被験者がこれらの報告書を物理的に所持している扱いにはなりません。旧サイクルの報告には旧施設コードを表示し、現在の変動パラメータの証明とは区別します。
+          <p class="archive-note">
+            あなたが振り返るための記録です。新しい被験者がこの文書を持っているわけではありません。旧サイクルの記録は、今のルールの証明にはなりません。
           </p>
-          <div class="card-grid">
+          <div class="archive-list">
             ${
               this.state.reportArchive.length === 0
                 ? '<p class="empty-note">まだ事後報告の記録はありません。</p>'
                 : this.state.reportArchive
                     .slice()
                     .reverse()
-                    .map(
-                      (rep) => `
-                  <div class="note-card ${!rep.isCurrentCycle ? 'old-cycle-card' : ''}">
-                    <div class="card-meta">
-                      ${
-                        rep.isCurrentCycle
-                          ? '【現サイクル】'
-                          : '【旧サイクル記録（現ルールの保証なし）】'
-                      }
-                      施設コード: ${this.escapeHtml(rep.facilityCode)} | 第${rep.day}日 | 区画: ${
-                        rep.roomCode
-                      } | 当事者: ${this.escapeHtml(rep.observerSubjectId)}
+                    .map((rep) => {
+                      const outcome =
+                        rep.outcome === 'survived'
+                          ? { text: '生還', tone: 'blue' }
+                          : rep.outcome === 'dead'
+                          ? { text: '死亡', tone: 'red' }
+                          : rep.outcome === 'failed_timeout'
+                          ? { text: '業務未達', tone: 'amber' }
+                          : { text: '終了', tone: 'gray' };
+                      return `
+                  <article class="archive-entry ${rep.isCurrentCycle ? '' : 'archive-entry-old'}">
+                    <div class="archive-entry-head">
+                      <span class="report-stamp report-stamp-${outcome.tone}">${outcome.text}</span>
+                      <strong>第${rep.day}日 ・ ${this.escapeHtml(rep.roomCode)}</strong>
+                      <span class="archive-entry-meta">${this.escapeHtml(rep.observerSubjectId)} ／ ${this.escapeHtml(
+                        rep.facilityCode
+                      )}${rep.isCurrentCycle ? '' : '（旧サイクル）'}</span>
                     </div>
-                    <div class="card-fact">${this.escapeHtml(rep.fragmentText)}</div>
-                  </div>
-                `
-                    )
+                    <p>${this.escapeHtml(rep.fragmentText)}</p>
+                  </article>
+                `;
+                    })
                     .join('')
             }
           </div>
@@ -1766,6 +2059,7 @@ export class NeedToKnowApp {
               <h4>実験画面の見方</h4>
               <ul class="help-list">
                 <li><strong>割当作業:</strong> 召集時に通達された作業と完了条件です。異常の回避法は表示しません。実験中にインターホンで追加される指示は右側に出ます。従うかどうかは自分で判断してください。</li>
+                <li><strong>信用・疑念・評価:</strong> 画面上部の目盛りです。行動の結果は「結果」欄に「信用 +1」のように表示されます。設定で目盛りを消し、文章だけの表示にもできます。</li>
                 <li><strong>室内オブジェクト:</strong> 「調べる」「回収」「面接を受ける」など、ボタンを押したときの動作を示します。</li>
                 <li><strong>知覚字幕:</strong> 足音・照明・機械音など、実際に知覚できた出来事です。</li>
                 <li><strong>返答:</strong> 「従う」を選んだだけでは移動しません。作業は移動操作とオブジェクトで行います。</li>
@@ -1803,11 +2097,12 @@ export class NeedToKnowApp {
             <h3 class="heading-with-icon">${iconSvg('document', 22)}${this.escapeHtml(ORIENTATION_DOCUMENT.title)}</h3>
             <button type="button" class="btn-terminal" id="btn-close-orientation">閉じる</button>
           </div>
-          <div class="clinical-report-box">
-            ${ORIENTATION_DOCUMENT.body
-              .map((line) => `<p>${this.escapeHtml(line)}</p>`)
-              .join('')}
-          </div>
+          ${this.renderReportDoc({
+            label: ORIENTATION_DOCUMENT.title,
+            kicker: '配属時交付文書',
+            meta: [],
+            sections: [{ heading: '通達', paragraphs: ORIENTATION_DOCUMENT.body }],
+          })}
         </div>
       </div>
     `;
@@ -1835,6 +2130,10 @@ export class NeedToKnowApp {
                 settings.volume
               }" />
               <span id="volume-value">${Math.round(settings.volume * 100)}%</span>
+            </label>
+            <label class="setting-row">
+              <span>信用・疑念・評価を目盛りで表示（OFFにすると描写の文章だけで伝える原案どおりの表示）:</span>
+              <input type="checkbox" id="chk-status-meters" ${this.statusMetersOn() ? 'checked' : ''} />
             </label>
             <label class="setting-row">
               <span>開発検証用ログ表示（内部数値 C/S/E・Seed・変動パラメータを表示）:</span>
@@ -1935,8 +2234,14 @@ export class NeedToKnowApp {
       this.renderUI();
     });
 
+    document.getElementById('btn-dismiss-result')?.addEventListener('click', () => {
+      this.lastResult = null;
+      this.renderUI();
+    });
+
     // Title buttons
     document.getElementById('btn-start-standard')?.addEventListener('click', () => {
+      this.lastResult = null;
       this.state = createInitialGameState(
         INITIAL_FIXED_SEED,
         this.state.reportArchive,
@@ -1947,11 +2252,13 @@ export class NeedToKnowApp {
       this.renderUI();
     });
     document.getElementById('btn-start-random')?.addEventListener('click', () => {
+      this.lastResult = null;
       this.state = startNewCycle(this.state, `SEED-${Date.now()}`, false);
       this.autoSave();
       this.renderUI();
     });
     document.getElementById('btn-start-practice')?.addEventListener('click', () => {
+      this.lastResult = null;
       this.state = startNewCycle(this.state, INITIAL_FIXED_SEED, true);
       this.autoSave();
       this.renderUI();
@@ -1959,47 +2266,32 @@ export class NeedToKnowApp {
 
     // Comparison Interview buttons
     document.getElementById('btn-comp-cooperate')?.addEventListener('click', () => {
-      handleComparisonInterviewAction(this.state, 'cooperate_answer');
-      this.autoSave();
-      this.renderUI();
+      this.runAction('比較面接', () => handleComparisonInterviewAction(this.state, 'cooperate_answer'));
     });
     document.getElementById('btn-comp-silent-first')?.addEventListener('click', () => {
-      handleComparisonInterviewAction(this.state, 'silent_first');
-      this.autoSave();
-      this.renderUI();
+      this.runAction('比較面接', () => handleComparisonInterviewAction(this.state, 'silent_first'));
     });
     document.getElementById('btn-comp-silent-confirm')?.addEventListener('click', () => {
-      handleComparisonInterviewAction(this.state, 'silent_confirm');
-      this.autoSave();
-      this.renderUI();
+      this.runAction('比較面接', () => handleComparisonInterviewAction(this.state, 'silent_confirm'));
     });
 
     // Morning buttons
     document.getElementById('btn-morning-reverify-badge')?.addEventListener('click', () => {
-      const msg = performBadgeReverification(this.state.subject, this.state.trial);
-      this.state.lastActionLog.push(msg);
-      this.autoSave();
-      this.renderUI();
+      this.runAction('処遇票の再照合', () => {
+        this.state.lastActionLog.push(performBadgeReverification(this.state.subject, this.state.trial));
+      });
     });
     document.getElementById('btn-water-clues')?.addEventListener('click', () => {
-      interactWaterCoolerInMorning(this.state, 'inspect_clues');
-      this.autoSave();
-      this.renderUI();
+      this.runAction('給水器の記録を調べた', () => interactWaterCoolerInMorning(this.state, 'inspect_clues'));
     });
     document.getElementById('btn-water-drink')?.addEventListener('click', () => {
-      interactWaterCoolerInMorning(this.state, 'drink');
-      this.autoSave();
-      this.renderUI();
+      this.runAction('給水器の水を飲んだ', () => interactWaterCoolerInMorning(this.state, 'drink'));
     });
     document.getElementById('btn-water-skip')?.addEventListener('click', () => {
-      interactWaterCoolerInMorning(this.state, 'skip');
-      this.autoSave();
-      this.renderUI();
+      this.runAction('給水器の水を飲まなかった', () => interactWaterCoolerInMorning(this.state, 'skip'));
     });
     document.getElementById('btn-morning-envelope')?.addEventListener('click', () => {
-      inspectEnvelopeInMorning(this.state);
-      this.autoSave();
-      this.renderUI();
+      this.runAction('寝台下の封筒を調べた', () => inspectEnvelopeInMorning(this.state));
     });
     document.getElementById('btn-morning-doc')?.addEventListener('click', () => {
       this.orientationModalOpen = true;
@@ -2008,17 +2300,13 @@ export class NeedToKnowApp {
     document.querySelectorAll('.btn-talk-cm').forEach((btn) => {
       btn.addEventListener('click', () => {
         const cmId = (btn as HTMLElement).dataset.cm!;
-        talkToCellmate(this.state, cmId, 'morning');
-        this.autoSave();
-        this.renderUI();
+        this.runAction('同房者と話した', () => talkToCellmate(this.state, cmId, 'morning'));
       });
     });
     document.querySelectorAll('.btn-trade-item').forEach((btn) => {
       btn.addEventListener('click', () => {
         const item = (btn as HTMLElement).dataset.item as OptionalItemId;
-        acquireOptionalItem(this.state, item);
-        this.autoSave();
-        this.renderUI();
+        this.runAction('物資を交換した', () => acquireOptionalItem(this.state, item));
       });
     });
     document.getElementById('btn-final-day-escape')?.addEventListener('click', () => {
@@ -2027,6 +2315,7 @@ export class NeedToKnowApp {
       this.renderUI();
     });
     document.getElementById('btn-proceed-briefing')?.addEventListener('click', () => {
+      this.lastResult = null;
       proceedFromMorning(this.state, 'normal_duty');
       this.autoSave();
       this.renderUI();
@@ -2035,6 +2324,7 @@ export class NeedToKnowApp {
     // Briefing button
     document.getElementById('btn-enter-trial')?.addEventListener('click', () => {
       this.lastCueCount = 0;
+      this.lastResult = null;
       this.clearMovementInputs();
       this.selectedMoveMode = 'normal';
       startCurrentDayTrial(this.state);
@@ -2308,17 +2598,13 @@ export class NeedToKnowApp {
     document.querySelectorAll('.debrief-choice-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
         const choiceId = (btn as HTMLElement).dataset.choice!;
-        submitDebriefResponse(this.state, choiceId);
-        this.autoSave();
-        this.renderUI();
+        this.runAction('事後聴取の結果', () => submitDebriefResponse(this.state, choiceId));
       });
     });
 
     // Death report button
     document.getElementById('btn-proceed-death')?.addEventListener('click', () => {
-      proceedFromDeathReport(this.state);
-      this.autoSave();
-      this.renderUI();
+      this.runAction('新しい被験者が配属された', () => proceedFromDeathReport(this.state));
     });
 
     // Night buttons
@@ -2355,9 +2641,7 @@ export class NeedToKnowApp {
           });
         }
       }
-      copyItemsToEnvelopeAtNight(this.state, items);
-      this.autoSave();
-      this.renderUI();
+      this.runAction('封筒へ複写した', () => copyItemsToEnvelopeAtNight(this.state, items));
     });
     document.getElementById('btn-night-open-note')?.addEventListener('click', () => {
       this.notebookOpen = true;
@@ -2365,28 +2649,24 @@ export class NeedToKnowApp {
       this.renderUI();
     });
     document.getElementById('btn-night-safe-task')?.addEventListener('click', () => {
-      performSafeReevaluationTaskAtNight(this.state);
-      this.autoSave();
-      this.renderUI();
+      this.runAction('安全な再評価業務を行った', () => performSafeReevaluationTaskAtNight(this.state));
     });
     document.getElementById('btn-night-talk-cm')?.addEventListener('click', () => {
-      talkToCellmate(this.state, 'cm-observer', 'night');
-      this.autoSave();
-      this.renderUI();
+      this.runAction('同房者と情報を交換した', () => talkToCellmate(this.state, 'cm-observer', 'night'));
     });
     document.getElementById('btn-proceed-next-day')?.addEventListener('click', () => {
-      proceedFromNightToNextDay(this.state);
-      this.autoSave();
-      this.renderUI();
+      this.runAction('夜が明けた', () => proceedFromNightToNextDay(this.state));
     });
 
     // Ending buttons
     document.getElementById('btn-ending-new-cycle')?.addEventListener('click', () => {
+      this.lastResult = null;
       this.state = startNewCycle(this.state, undefined, false);
       this.autoSave();
       this.renderUI();
     });
     document.getElementById('btn-ending-practice')?.addEventListener('click', () => {
+      this.lastResult = null;
       this.state = startNewCycle(this.state, INITIAL_FIXED_SEED, true);
       this.autoSave();
       this.renderUI();
@@ -2449,6 +2729,11 @@ export class NeedToKnowApp {
     });
     document.getElementById('rng-volume')?.addEventListener('change', () => {
       this.autoSave();
+    });
+    document.getElementById('chk-status-meters')?.addEventListener('change', (e) => {
+      this.state.settings.statusMeters = (e.target as HTMLInputElement).checked;
+      this.autoSave();
+      this.renderUI();
     });
     document.getElementById('chk-devlog')?.addEventListener('change', (e) => {
       this.state.settings.devLogVisible = (e.target as HTMLInputElement).checked;
