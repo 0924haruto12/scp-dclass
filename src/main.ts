@@ -1,5 +1,12 @@
 import './style.css';
+import { brandMarkDataUrl } from './render/art';
 import { NeedToKnowApp } from './ui/app';
+
+const favicon = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+if (favicon) {
+  favicon.type = 'image/svg+xml';
+  favicon.href = brandMarkDataUrl();
+}
 
 const root = document.getElementById('app');
 if (root) {

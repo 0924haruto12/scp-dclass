@@ -97,6 +97,13 @@ try {
   await page.screenshot({ path: `${artifactsDir}/01-title.png`, fullPage: true });
   results.push('title: loaded');
 
+  await page.keyboard.press('h');
+  await page.getByRole('dialog', { name: '遊び方' }).waitFor();
+  await page.screenshot({ path: `${artifactsDir}/00-help.png`, fullPage: true });
+  await page.keyboard.press('h');
+  assert.equal(await page.getByRole('dialog', { name: '遊び方' }).count(), 0);
+  results.push('help: H opens and closes the controls guide');
+
   await click(/新規サイクル開始（初回固定Seed/);
   await page.getByText('第 1 日 朝').waitFor();
   await page.getByText(/第 1 \/ 30 日/).waitFor();
@@ -110,6 +117,38 @@ try {
   assert.equal(started.phase, 'trial');
   assert.equal(started.trialStatus, 'active');
   results.push('trial: T-101 started');
+
+  await page.keyboard.press('h');
+  assert.equal((await readState()).trialStatus, 'paused');
+  await page.keyboard.press('h');
+  assert.equal((await readState()).trialStatus, 'active');
+  results.push('help: guide pauses and resumes an active trial');
+
+  await page.locator('.trial-objective-panel').waitFor();
+  assert.equal(await page.locator('.advanced-controls').first().evaluate((el) => el.open), false);
+  results.push('trial: objective is visible and verification presets are collapsed');
+
+  await page.keyboard.press('4');
+  const questioned = await page.evaluate(() => window.__NTK_APP__.getState().trial?.instructions[0].questionAsked);
+  assert.equal(questioned, true);
+  await page.keyboard.press('e');
+  const inspected = await page.evaluate(() =>
+    window.__NTK_APP__.getState().trial?.interactables.some((obj) => obj.inspected)
+  );
+  assert.equal(inspected, true);
+  results.push('controls: number keys reply and E inspects the nearest object');
+
+  await page.locator('[data-move-speed="slow"]').click();
+  assert.equal(await page.evaluate(() => window.__NTK_APP__.getState().trial?.player.slowToggle), true);
+  await page.locator('[data-move-speed="normal"]').click();
+  const beforeHold = await readState();
+  await page.locator('[data-hold-move-x="1"]').hover();
+  await page.mouse.down();
+  await page.waitForTimeout(600);
+  await page.mouse.up();
+  const afterHold = await readState();
+  assert.ok(afterHold.x > beforeHold.x + 0.5, `hold movement x=${beforeHold.x} -> ${afterHold.x}`);
+  results.push('controls: speed selection and press-and-hold movement work');
 
   await page.keyboard.down('d');
   await page.waitForTimeout(2500);

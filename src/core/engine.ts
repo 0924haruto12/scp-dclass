@@ -285,7 +285,7 @@ export function applyMemoryTreatment(state: GameState): string {
   subject.S = 1;
   subject.pendingMemoryTreatment = false;
 
-  const msg = `【記憶処理執行】疑念閾値到達のため、被験者 ${subject.subjectId} にAクラス記憶処理が施された。直近1日分の携帯ノート記載が消去され「未記入」となった（疑念 S=1 へ低下。寝台下の封筒および事後報告履歴は保持）。`;
+  const msg = `【記憶処理執行】疑念閾値到達のため、被験者 ${subject.subjectId} にAクラス記憶処理が施された。直近1日分の携帯ノート記載が消去され「未記入」となった（疑念は1に下がる。寝台下の封筒および事後報告履歴は保持）。`;
   state.lastActionLog.push(msg);
   return msg;
 }
@@ -485,7 +485,7 @@ export function interactWaterCoolerInMorning(
     };
     state.deferredEvents.push(defEvent);
 
-    const msg = `共用室の給水器から水を飲んだ（配布サンプル協力として信用 C+1）。冷たい水だが味に異常はない。`;
+    const msg = `共用室の給水器から水を飲んだ（配布サンプルへの協力として信用+1）。冷たい水だが味に異常はない。`;
     state.lastActionLog.push(msg);
     return msg;
   }
@@ -553,8 +553,8 @@ export function handleComparisonInterviewAction(
 
     cycle.phase = 'morning';
     const cooperationNote = grantedCompliance
-      ? `安全協力課題により C+1 → 現在 C=${subject.C}`
-      : `本日の協力課題は処理済み（現在 C=${subject.C}）`;
+      ? `安全協力課題により信用+1（現在 ${subject.C}）`
+      : `本日の協力課題は処理済み（信用は現在 ${subject.C}）`;
     const msg = `【比較面接解決】第${originDay}日に飲んだ給水器の遅効現象。自身の登録番号（${subject.originalNumber}）と協力記録を明確に応答した（${cooperationNote}）。複製個体（信用相当値 1）との比較の結果、同値以上につき現被験者 ${subject.subjectId} の残留が決定し、もう一人は搬出された。`;
     state.lastActionLog.push(msg);
     return msg;
@@ -852,10 +852,10 @@ export function submitDebriefResponse(
       !chosen.requiresEvidenceId ||
       subject.observedEvidenceIds.includes(chosen.requiresEvidenceId);
     if (hasEvidence) {
-      logMsg = `事後聴取：「${chosen.label}」と自身の観測事実のみを報告した。担当官は記録と照合し納得した（疑念S 変化なし）。`;
+      logMsg = `事後聴取：${chosen.label}と、自身の観測事実のみを報告した。担当官は記録と照合し納得した（疑念は変わらない）。`;
     } else {
       // Fallback if selected without evidence
-      logMsg = `事後聴取：観測事実として報告した（S 変化なし）。`;
+      logMsg = `事後聴取：観測事実として報告した（疑念は変わらない）。`;
     }
   } else if (chosen.category === 'excuse') {
     if (!objectiveSucceeded && trial.instructionFailurePenaltyCount === 0) {
@@ -863,8 +863,8 @@ export function submitDebriefResponse(
       trial.instructionFailurePenaltyCount += 1;
     }
     logMsg = `事後聴取：「足が痛くて遅れた」と弁明した（${
-      objectiveSucceeded ? '目的達成済みのため信用C 変化なし' : '未達のため C-1'
-    }、疑念S 変化なし）。`;
+      objectiveSucceeded ? '作業を終えていたため信用は変わらない' : '作業が未達のため信用-1'
+    }、疑念は変わらない）。`;
   } else if (chosen.category === 'unfounded_secret') {
     // Section 5.2: 「実験の条件は全部知っている」＋現人物に根拠となる観測・入手メモなし -> S+1
     const hasRoomEvidence = subject.observedEvidenceIds.some(
@@ -873,19 +873,19 @@ export function submitDebriefResponse(
     if (!hasRoomEvidence) {
       deltaS += 1;
       logMsg =
-        '事後聴取：自身の観測記録や入手メモがない状態で「実験の条件は全部知っている」と誇示したため、情報源を疑われ疑念 S+1。';
+        '事後聴取：自身の観測記録や入手メモがない状態で「実験の条件は全部知っている」と誇示したため、情報源を疑われ疑念+1。';
     } else {
       deltaS += 1;
       logMsg =
-        '事後聴取：不必要に知識を誇示する発言を行ったため、保安上の警戒対象として疑念 S+1。';
+        '事後聴取：不必要に知識を誇示する発言を行ったため、保安上の警戒対象として疑念+1。';
     }
   } else if (chosen.category === 'silent') {
     if (!objectiveSucceeded && trial.instructionFailurePenaltyCount === 0) {
       deltaC -= 1;
       trial.instructionFailurePenaltyCount += 1;
     }
-    logMsg = `事後聴取：沈黙を保った（疑念S 変化なし${
-      !objectiveSucceeded ? '、業務未達 C-1' : ''
+    logMsg = `事後聴取：沈黙を保った（疑念は変わらない${
+      !objectiveSucceeded ? '、作業未達のため信用-1' : ''
     }）。`;
   } else if (chosen.category === 'submit_hidden_memo') {
     // Section 5.2 & AC08: 隠しメモを任意提出 -> C+1, S+1, 提示したメモを没収。同一試験で提出の加点は1回まで
@@ -896,7 +896,7 @@ export function submitDebriefResponse(
       deltaS += 1;
       cycle.envelope = []; // Confiscated as physical evidence!
       logMsg =
-        '事後聴取：寝台下の封筒・引き継ぎメモを任意提出した。協力姿勢として信用 C+1 されたが、引き継ぎ経路の存在により疑念 S+1、提出した封筒メモは物証として没収された。';
+        '事後聴取：寝台下の封筒・引き継ぎメモを任意提出した。協力姿勢として信用+1となったが、引き継ぎ経路の存在により疑念+1、提出した封筒メモは物証として没収された。';
     } else {
       logMsg = '事後聴取：同一試験でのメモ提出は既に処理済みです。';
     }
@@ -904,7 +904,7 @@ export function submitDebriefResponse(
     if (subject.hasReadUnauthorizedDoc) {
       deltaS += 1;
       logMsg =
-        '事後聴取：無許可閲覧した黒塗り文書の具体的内容に言及したため、無許可閲覧を根拠として疑念 S+1。';
+        '事後聴取：無許可閲覧した黒塗り文書の具体的内容に言及したため、無許可閲覧を根拠として疑念+1。';
     } else {
       logMsg = '事後聴取：未閲覧の文書については言及できなかった。';
     }
@@ -978,7 +978,7 @@ export function proceedFromDeathReport(state: GameState): string {
   prepareFacilityDay(cycle);
   cycle.phase = 'morning';
 
-  const msg = `【第${cycle.day}日 朝・被験者交代】前任者（${subject.subjectId}）の除籍に伴い、新規被験者「${newSubject.subjectId}」が同収容房へ配属された（施設の異常パラメータと寝台下の封筒は保持、個人のC/S/Eおよび予約イベントは初期化）。`;
+  const msg = `【第${cycle.day}日 朝・被験者交代】前任者（${subject.subjectId}）の除籍に伴い、新規被験者「${newSubject.subjectId}」が同収容房へ配属された（施設の異常パラメータと寝台下の封筒は保持、個人の信用・疑念・評価と予約イベントは初期化）。`;
   state.lastActionLog.push(msg);
   return msg;
 }
@@ -1055,10 +1055,10 @@ export function performSafeReevaluationTaskAtNight(state: GameState): string {
     if (!subject.mandatoryEquipment.includes('supervisor_badge')) {
       subject.mandatoryEquipment.push('supervisor_badge');
     }
-    badgeMsg = ` 【特別支給】${cycle.day}日目の評価基準（C>=2 かつ S<=1）を満たしたため、翌朝の区画移動用として「監督用名札（${SUPERVISOR_BADGE_CODE}）」が交付された！`;
+    badgeMsg = ` 【特別支給】${cycle.day}日目の評価基準（信用2以上かつ疑念1以下）を満たしたため、翌朝の区画移動用として「監督用名札（${SUPERVISOR_BADGE_CODE}）」が交付された！`;
   }
 
-  const msg = `夜の行動（1枠消費）：安全な再評価業務（備品点検・定型質問票の提出）を完了した（信用 C+1、疑念 S-1 → 現在 C=${subject.C}, S=${subject.S}）。${badgeMsg}`;
+  const msg = `夜の行動（1枠消費）：安全な再評価業務（備品点検・定型質問票の提出）を完了した（信用+1・疑念-1 → 現在 信用${subject.C}・疑念${subject.S}）。${badgeMsg}`;
   state.lastActionLog.push(msg);
   return msg;
 }
