@@ -76,6 +76,7 @@ const readState = (target = page) =>
       day: state.cycle.day,
       trialStatus: state.trial?.status ?? null,
       x: state.trial?.player.x ?? null,
+      moveMode: state.trial?.player.moveMode ?? null,
       clock: state.trial?.externalClock ?? null,
       hazard: state.trial?.hazardTimer ?? null,
       gait: state.trial?.gait.state ?? null,
@@ -239,6 +240,29 @@ try {
   assert.ok(Math.abs(afterResume.x - afterBlur.x) < 0.01, 'movement continued after blur');
   await page.keyboard.up('d');
   results.push('input: movement keys are cleared when focus is lost');
+
+  // macOS Option changes e.key (Option+D is "∂"); replay those events and
+  // check that slow walking works and the key is released on keyup.
+  const sendKey = (type, key, code, altKey) =>
+    page.evaluate(
+      ([eventType, eventKey, eventCode, alt]) =>
+        window.dispatchEvent(new KeyboardEvent(eventType, { key: eventKey, code: eventCode, altKey: alt })),
+      [type, key, code, altKey]
+    );
+  await sendKey('keydown', 'Alt', 'AltLeft', true);
+  await sendKey('keydown', '∂', 'KeyD', true);
+  const optionStart = await readState();
+  await page.waitForTimeout(300);
+  const optionMoving = await readState();
+  assert.ok(optionMoving.x > optionStart.x + 0.05, 'Option+D did not move the player');
+  assert.equal(optionMoving.moveMode, 'slow');
+  await sendKey('keyup', '∂', 'KeyD', true);
+  await sendKey('keyup', 'Alt', 'AltLeft', false);
+  const optionReleased = await readState();
+  await page.waitForTimeout(300);
+  const optionAfter = await readState();
+  assert.ok(Math.abs(optionAfter.x - optionReleased.x) < 0.01, 'movement continued after Option+D keyup');
+  results.push('input: macOS Option+D slow-walks and releases by physical key');
 
   // Narrow viewport must not overflow horizontally.
   await page.setViewportSize({ width: 390, height: 844 });

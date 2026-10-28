@@ -156,17 +156,19 @@ export class NeedToKnowApp {
         return;
       }
 
-      const key = e.key.toLowerCase();
-      this.keysDown.add(key);
+      // Match physical keys: on macOS, Option changes e.key (Option+D is "∂"),
+      // which broke Alt-held slow walking and left keys held after keyup.
+      const code = e.code;
+      this.keysDown.add(code);
 
-      if (e.repeat && (key === 'n' || key === 'escape' || key === 'p' || key === 'c')) return;
+      if (e.repeat && (code === 'KeyN' || code === 'Escape' || code === 'KeyP' || code === 'KeyC')) return;
 
-      if (key === 'n') {
+      if (code === 'KeyN') {
         e.preventDefault();
         this.toggleNotebook();
         return;
       }
-      if (key === 'escape' || key === 'p') {
+      if (code === 'Escape' || code === 'KeyP') {
         e.preventDefault();
         this.togglePauseOrSettings();
         return;
@@ -174,15 +176,15 @@ export class NeedToKnowApp {
 
       if (this.state.cycle.phase === 'trial' && this.state.trial) {
         const trial = this.state.trial;
-        if (key === 'c') {
+        if (code === 'KeyC') {
           e.preventDefault();
           trial.player.slowToggle = !trial.player.slowToggle;
           this.renderUI();
-        } else if (key === 'q') {
+        } else if (code === 'KeyQ') {
           trial.player.facingAngle -= 0.35;
-        } else if (key === 'e') {
+        } else if (code === 'KeyE') {
           trial.player.facingAngle += 0.35;
-        } else if (key === 'f') {
+        } else if (code === 'KeyF') {
           e.preventDefault();
           this.interactNearestObject();
         }
@@ -190,7 +192,7 @@ export class NeedToKnowApp {
     });
 
     window.addEventListener('keyup', (e) => {
-      this.keysDown.delete(e.key.toLowerCase());
+      this.keysDown.delete(e.code);
     });
   }
 
@@ -238,19 +240,20 @@ export class NeedToKnowApp {
       moveY = this.manualMoveOverride.moveY;
       moveMode = this.manualMoveOverride.mode;
     } else {
-      if (this.keysDown.has('d') || this.keysDown.has('arrowright')) moveX += 1;
-      if (this.keysDown.has('a') || this.keysDown.has('arrowleft')) moveX -= 1;
-      if (this.keysDown.has('s') || this.keysDown.has('arrowdown')) moveY += 1;
-      if (this.keysDown.has('w') || this.keysDown.has('arrowup')) moveY -= 1;
+      const held = (...codes: string[]) => codes.some((code) => this.keysDown.has(code));
+      if (held('KeyD', 'ArrowRight')) moveX += 1;
+      if (held('KeyA', 'ArrowLeft')) moveX -= 1;
+      if (held('KeyS', 'ArrowDown')) moveY += 1;
+      if (held('KeyW', 'ArrowUp')) moveY -= 1;
 
-      if (this.keysDown.has(' ')) {
+      if (held('Space')) {
         moveX = 0;
         moveY = 0;
         moveMode = 'stop';
       } else if (moveX !== 0 || moveY !== 0) {
-        if (this.keysDown.has('shift')) {
+        if (held('ShiftLeft', 'ShiftRight')) {
           moveMode = 'run';
-        } else if (this.keysDown.has('alt') || trial.player.slowToggle) {
+        } else if (held('AltLeft', 'AltRight') || trial.player.slowToggle) {
           moveMode = 'slow';
         } else {
           moveMode = 'normal';
