@@ -49,8 +49,18 @@ export class MemoryStorageBackend implements StorageBackend {
 }
 
 export function getDefaultStorageBackend(): StorageBackend {
-  if (typeof window !== 'undefined' && window.localStorage) {
-    return window.localStorage;
+  if (typeof window !== 'undefined') {
+    try {
+      return window.localStorage;
+    } catch {
+      // Accessing the localStorage property itself can throw a SecurityError.
+      // Do not pretend an ephemeral in-memory save was persisted.
+      return {
+        getItem() { throw new Error('Storage unavailable'); },
+        setItem() { throw new Error('Storage unavailable'); },
+        removeItem() { throw new Error('Storage unavailable'); },
+      };
+    }
   }
   return new MemoryStorageBackend();
 }
@@ -99,11 +109,18 @@ function isValidSerializedSave(obj: unknown): obj is SerializedSaveRecords {
     !cycle ||
     typeof cycle.cycleId !== 'string' ||
     typeof cycle.seed !== 'string' ||
-    typeof cycle.day !== 'number' ||
+    !Number.isInteger(cycle.day) ||
     cycle.day < 1 ||
     cycle.day > RUN_LENGTH_DAYS ||
+    !['title', 'morning_comparison', 'morning', 'briefing', 'trial', 'debrief', 'death_report', 'night', 'final_eval', 'ending'].includes(cycle.phase) ||
     !cycle.fixedParams ||
-    !Array.isArray(cycle.processedEventIds)
+    ![1.5, 2.5].includes(cycle.fixedParams.gaitAllowedSpeed) ||
+    !['hazard_assignment', 'ration_priority'].includes(cycle.fixedParams.badgeTargetFate) ||
+    ![2, 3].includes(cycle.fixedParams.waterCoolerDelayDays) ||
+    ![1, 2].includes(cycle.fixedParams.whiteDoorTimeRatio) ||
+    !Array.isArray(cycle.envelope) ||
+    !Array.isArray(cycle.processedEventIds) ||
+    !cycle.processedEventIds.every((id) => typeof id === 'string')
   ) {
     return false;
   }
@@ -112,11 +129,26 @@ function isValidSerializedSave(obj: unknown): obj is SerializedSaveRecords {
     typeof subject.subjectId !== 'string' ||
     typeof subject.C !== 'number' ||
     typeof subject.S !== 'number' ||
-    typeof subject.E !== 'number'
+    typeof subject.E !== 'number' ||
+    !Array.isArray(subject.inventory) ||
+    !Array.isArray(subject.mandatoryEquipment) ||
+    !Array.isArray(subject.rewardedEventKeys) ||
+    !subject.rewardedEventKeys.every((key) => typeof key === 'string') ||
+    !Array.isArray(subject.observedEvidenceIds) ||
+    !subject.portableNote ||
+    !Array.isArray(subject.portableNote.observations) ||
+    !Array.isArray(subject.portableNote.rumors) ||
+    !Array.isArray(subject.portableNote.hypotheses)
   ) {
     return false;
   }
   if (!Array.isArray(r.DeferredEvent) || !Array.isArray(r.ReportArchive)) {
+    return false;
+  }
+  if (r.Trial !== null) {
+    const trial = r.Trial as Trial | undefined;
+    if (!trial || typeof trial !== 'object' || !trial.player || !trial.omen || !trial.gait || !Array.isArray(trial.interactables)) return false;
+  } else if (cycle.phase === 'trial') {
     return false;
   }
   return true;
@@ -146,14 +178,9 @@ export function saveGameState(
   }
   const existingRaw = existing.value;
   if (existingRaw !== null) {
-    try {
-      const parsed = JSON.parse(existingRaw);
-      if (!isValidSerializedSave(parsed)) {
-        trySetItem(backend, CORRUPTED_BACKUP_KEY, existingRaw);
-        return false;
-      }
-    } catch {
-      trySetItem(backend, CORRUPTED_BACKUP_KEY, existingRaw);
+    // Use the same migration and restoration checks as loading: a payload may
+    // pass the shallow schema check but still fail while restoring nested data.
+    if (loadGameState(backend).status !== 'ok') {
       return false;
     }
   }

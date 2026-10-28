@@ -177,6 +177,9 @@ try {
   );
   await corruptPage.reload({ waitUntil: 'networkidle' });
   await corruptPage.locator('.corrupted-banner').waitFor();
+  for (const id of ['btn-start-standard', 'btn-start-random', 'btn-start-practice']) {
+    assert.equal(await corruptPage.locator(`#${id}`).isDisabled(), true);
+  }
   const preserved = await corruptPage.evaluate(
     ([key, backup]) => ({
       raw: localStorage.getItem(key),
@@ -198,6 +201,20 @@ try {
   assert.equal(afterResolve.backup, corrupted);
   results.push('storage: corrupted payload preserved and archived only on explicit action');
   await corruptPage.close();
+
+  // Releasing a movement key while the window is unfocused must not leave it held.
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+  await page.locator('#btn-resume-trial').click();
+  await page.keyboard.down('d');
+  await page.waitForTimeout(150);
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+  await page.locator('#btn-resume-trial').click();
+  const afterBlur = await readState();
+  await page.waitForTimeout(350);
+  const afterResume = await readState();
+  assert.ok(Math.abs(afterResume.x - afterBlur.x) < 0.01, 'movement continued after blur');
+  await page.keyboard.up('d');
+  results.push('input: movement keys are cleared when focus is lost');
 
   // Narrow viewport must not overflow horizontally.
   await page.setViewportSize({ width: 390, height: 844 });

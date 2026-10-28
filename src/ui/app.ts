@@ -111,13 +111,14 @@ export class NeedToKnowApp {
     if (!this.saveFailureReported) {
       this.saveFailureReported = true;
       this.state.lastActionLog.push(
-        '[保存] 保存に失敗しました。ブラウザの空き容量・ストレージ設定を確認してください。元のデータは保持されています。'
+        '[保存] 保存に失敗しました。ブラウザの空き容量・ストレージ設定を確認してください。'
       );
     }
   }
 
   private setupGlobalListeners(): void {
     window.addEventListener('blur', () => {
+      this.keysDown.clear();
       if (this.state.trial && this.state.trial.status === 'active') {
         setTrialPause(this.state.trial, 'blur');
         this.autoSave();
@@ -132,6 +133,7 @@ export class NeedToKnowApp {
 
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState !== 'hidden') return;
+      this.keysDown.clear();
       if (this.state.trial && this.state.trial.status === 'active') {
         setTrialPause(this.state.trial, 'blur');
       }
@@ -146,6 +148,8 @@ export class NeedToKnowApp {
 
       const key = e.key.toLowerCase();
       this.keysDown.add(key);
+
+      if (e.repeat && (key === 'n' || key === 'escape' || key === 'p' || key === 'c')) return;
 
       if (key === 'n') {
         e.preventDefault();
@@ -498,7 +502,7 @@ export class NeedToKnowApp {
               <strong>【保存データ破損警告 (AC15保護作動)】</strong>
               <p>${this.escapeHtml(
                 this.state.corruptedSaveNotice
-              )}<br>元の破損データは上書きされずそのまま保護されています。自動的に新規データで置換することはしません。</p>
+              )}<br>保存領域を確認するまで新規開始を停止します。自動的に新規データで置換することはしません。</p>
             </div>
             <button type="button" class="btn-danger" id="btn-resolve-corrupted">
               元データをバックアップ保管して新規初期化を許可
@@ -632,13 +636,13 @@ export class NeedToKnowApp {
           </div>
 
           <div class="title-actions">
-            <button type="button" class="btn-primary" id="btn-start-standard">
+            <button type="button" class="btn-primary" id="btn-start-standard" ${this.state.corruptedSaveNotice ? 'disabled' : ''}>
               新規サイクル開始（初回固定Seed: FIXED-DEFAULT）
             </button>
-            <button type="button" class="btn-secondary" id="btn-start-random">
+            <button type="button" class="btn-secondary" id="btn-start-random" ${this.state.corruptedSaveNotice ? 'disabled' : ''}>
               新規ランダムSeedサイクル開始（変動パラメータ再抽選）
             </button>
-            <button type="button" class="btn-secondary" id="btn-start-practice">
+            <button type="button" class="btn-secondary" id="btn-start-practice" ${this.state.corruptedSaveNotice ? 'disabled' : ''}>
               学習用・固定Seed再試行モードで開始
             </button>
           </div>
@@ -1618,6 +1622,7 @@ export class NeedToKnowApp {
 
     // Title buttons
     document.getElementById('btn-start-standard')?.addEventListener('click', () => {
+      if (this.state.corruptedSaveNotice) return;
       this.state = createInitialGameState(
         INITIAL_FIXED_SEED,
         this.state.reportArchive,
@@ -1628,11 +1633,13 @@ export class NeedToKnowApp {
       this.renderUI();
     });
     document.getElementById('btn-start-random')?.addEventListener('click', () => {
+      if (this.state.corruptedSaveNotice) return;
       this.state = startNewCycle(this.state, `SEED-${Date.now()}`, false);
       this.autoSave();
       this.renderUI();
     });
     document.getElementById('btn-start-practice')?.addEventListener('click', () => {
+      if (this.state.corruptedSaveNotice) return;
       this.state = startNewCycle(this.state, INITIAL_FIXED_SEED, true);
       this.autoSave();
       this.renderUI();

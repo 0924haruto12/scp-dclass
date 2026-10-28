@@ -570,6 +570,47 @@ class WriteFailingBackend implements StorageBackend {
 }
 
 describe('ストレージ障害時の保護（統合版で追加）', () => {
+  it('JSON形式でも復元に失敗する保存を自動保存で上書きしない', () => {
+    const storage = new MemoryStorageBackend();
+    expect(saveGameState(createInitialGameState(), storage)).toBe(true);
+    const payload = JSON.parse(storage.getItem(SAVE_STORAGE_KEY)!);
+    payload.Subject.rewardedEventKeys = null;
+    const corrupted = JSON.stringify(payload);
+    storage.setItem(SAVE_STORAGE_KEY, corrupted);
+
+    expect(loadGameState(storage).status).toBe('corrupted');
+    expect(saveGameState(createInitialGameState('OTHER'), storage)).toBe(false);
+    expect(storage.getItem(SAVE_STORAGE_KEY)).toBe(corrupted);
+  });
+
+  it('画面表示に必要なノートが欠けた保存を破損として保持する', () => {
+    const storage = new MemoryStorageBackend();
+    saveGameState(createInitialGameState(), storage);
+    const payload = JSON.parse(storage.getItem(SAVE_STORAGE_KEY)!);
+    delete payload.Subject.portableNote;
+    const corrupted = JSON.stringify(payload);
+    storage.setItem(SAVE_STORAGE_KEY, corrupted);
+    expect(loadGameState(storage).status).toBe('corrupted');
+    expect(saveGameState(createInitialGameState(), storage)).toBe(false);
+    expect(storage.getItem(SAVE_STORAGE_KEY)).toBe(corrupted);
+  });
+
+  it('localStorageの取得自体が拒否された場合も例外ではなく保存障害として扱う', () => {
+    const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { get localStorage() { throw new Error('SecurityError'); } },
+    });
+    try {
+      expect(loadGameState().status).toBe('corrupted');
+      expect(saveGameState(createInitialGameState())).toBe(false);
+      expect(archiveCorruptedAndClearSave()).toBe(false);
+    } finally {
+      if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
+      else Reflect.deleteProperty(globalThis, 'window');
+    }
+  });
+
   it('保存容量エラーでも例外を投げず、既存の正常なセーブを保持する', () => {
     const inner = new MemoryStorageBackend();
     const state = createInitialGameState('FIXED-DEFAULT');
