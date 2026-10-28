@@ -595,6 +595,50 @@ describe('ストレージ障害時の保護（統合版で追加）', () => {
     expect(storage.getItem(SAVE_STORAGE_KEY)).toBe(corrupted);
   });
 
+  it('型で定義された全フェーズと異常パラメータの全組み合わせを復元できる', () => {
+    const storage = new MemoryStorageBackend();
+    saveGameState(createInitialGameState(), storage);
+    const base = storage.getItem(SAVE_STORAGE_KEY)!;
+    const phases = ['title', 'morning_comparison', 'morning', 'briefing', 'debrief', 'death_report', 'night', 'final_eval', 'ending'];
+    for (const phase of phases) {
+      const payload = JSON.parse(base);
+      payload.FacilityCycle.phase = phase;
+      storage.setItem(SAVE_STORAGE_KEY, JSON.stringify(payload));
+      expect(loadGameState(storage).status, phase).toBe('ok');
+    }
+    for (const gaitAllowedSpeed of [1.5, 2.5]) {
+      for (const badgeTargetFate of ['hazard_assignment', 'ration_priority']) {
+        for (const waterCoolerDelayDays of [2, 3]) {
+          for (const whiteDoorTimeRatio of [1, 2]) {
+            const payload = JSON.parse(base);
+            payload.FacilityCycle.fixedParams = { gaitAllowedSpeed, badgeTargetFate, waterCoolerDelayDays, whiteDoorTimeRatio };
+            storage.setItem(SAVE_STORAGE_KEY, JSON.stringify(payload));
+            expect(loadGameState(storage).status).toBe('ok');
+          }
+        }
+      }
+    }
+  });
+
+  it('許容値にないフェーズや型の異なる異常パラメータを破損として扱う', () => {
+    const storage = new MemoryStorageBackend();
+    saveGameState(createInitialGameState(), storage);
+    const base = storage.getItem(SAVE_STORAGE_KEY)!;
+    const mutations: Array<(payload: any) => void> = [
+      (payload) => { payload.FacilityCycle.phase = 'unknown_phase'; },
+      (payload) => { payload.FacilityCycle.phase = 'toString'; },
+      (payload) => { payload.FacilityCycle.fixedParams.gaitAllowedSpeed = 2; },
+      (payload) => { payload.FacilityCycle.fixedParams.waterCoolerDelayDays = '3'; },
+      (payload) => { delete payload.FacilityCycle.fixedParams.whiteDoorTimeRatio; },
+    ];
+    for (const mutate of mutations) {
+      const payload = JSON.parse(base);
+      mutate(payload);
+      storage.setItem(SAVE_STORAGE_KEY, JSON.stringify(payload));
+      expect(loadGameState(storage).status).toBe('corrupted');
+    }
+  });
+
   it('localStorageの取得自体が拒否された場合は破損ではなく保存不可として扱う', () => {
     const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
     Object.defineProperty(globalThis, 'window', {

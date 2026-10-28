@@ -1,7 +1,9 @@
 import {
   ComparisonInterviewState,
+  CyclePhase,
   DeferredEvent,
   FacilityCycle,
+  FixedAnomalyParams,
   GameState,
   ReportArchive,
   Subject,
@@ -99,6 +101,46 @@ export function serializeGameState(state: GameState): string {
   return JSON.stringify(payload);
 }
 
+// Keyed by every member of each union, so adding a value to the type without
+// listing it here is a compile error instead of valid saves being rejected.
+const CYCLE_PHASES: Record<CyclePhase, true> = {
+  title: true,
+  morning_comparison: true,
+  morning: true,
+  briefing: true,
+  trial: true,
+  debrief: true,
+  death_report: true,
+  night: true,
+  final_eval: true,
+  ending: true,
+};
+
+const FIXED_PARAM_VALUES: {
+  [K in keyof FixedAnomalyParams]: Record<FixedAnomalyParams[K], true>;
+} = {
+  gaitAllowedSpeed: { 1.5: true, 2.5: true },
+  badgeTargetFate: { hazard_assignment: true, ration_priority: true },
+  waterCoolerDelayDays: { 2: true, 3: true },
+  whiteDoorTimeRatio: { 1: true, 2: true },
+};
+
+function isListedValue(table: object, value: unknown, type: 'string' | 'number'): boolean {
+  // The type check keeps "2" from matching the numeric key 2.
+  return typeof value === type && Object.hasOwn(table, value as PropertyKey);
+}
+
+function hasValidFixedParams(params: unknown): params is FixedAnomalyParams {
+  if (!params || typeof params !== 'object') return false;
+  const p = params as Record<string, unknown>;
+  return (
+    isListedValue(FIXED_PARAM_VALUES.gaitAllowedSpeed, p.gaitAllowedSpeed, 'number') &&
+    isListedValue(FIXED_PARAM_VALUES.badgeTargetFate, p.badgeTargetFate, 'string') &&
+    isListedValue(FIXED_PARAM_VALUES.waterCoolerDelayDays, p.waterCoolerDelayDays, 'number') &&
+    isListedValue(FIXED_PARAM_VALUES.whiteDoorTimeRatio, p.whiteDoorTimeRatio, 'number')
+  );
+}
+
 function isValidSerializedSave(obj: unknown): obj is SerializedSaveRecords {
   if (!obj || typeof obj !== 'object') return false;
   const r = obj as Record<string, unknown>;
@@ -112,12 +154,8 @@ function isValidSerializedSave(obj: unknown): obj is SerializedSaveRecords {
     !Number.isInteger(cycle.day) ||
     cycle.day < 1 ||
     cycle.day > RUN_LENGTH_DAYS ||
-    !['title', 'morning_comparison', 'morning', 'briefing', 'trial', 'debrief', 'death_report', 'night', 'final_eval', 'ending'].includes(cycle.phase) ||
-    !cycle.fixedParams ||
-    ![1.5, 2.5].includes(cycle.fixedParams.gaitAllowedSpeed) ||
-    !['hazard_assignment', 'ration_priority'].includes(cycle.fixedParams.badgeTargetFate) ||
-    ![2, 3].includes(cycle.fixedParams.waterCoolerDelayDays) ||
-    ![1, 2].includes(cycle.fixedParams.whiteDoorTimeRatio) ||
+    !isListedValue(CYCLE_PHASES, cycle.phase, 'string') ||
+    !hasValidFixedParams(cycle.fixedParams) ||
     !Array.isArray(cycle.envelope) ||
     !Array.isArray(cycle.processedEventIds) ||
     !cycle.processedEventIds.every((id) => typeof id === 'string')
