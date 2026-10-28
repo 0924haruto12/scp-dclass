@@ -4,6 +4,9 @@
   "private": true,
   "description": "NEED TO KNOW - 説明されない実験に送り込まれ、観察と推理で30日間の生存手順を組み立てるサバイバルホラー",
   "type": "module",
+  "engines": {
+    "node": "^20.19.0 || ^22.12.0 || >=24.0.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
