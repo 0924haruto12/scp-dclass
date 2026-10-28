@@ -202,6 +202,30 @@ try {
   results.push('storage: corrupted payload preserved and archived only on explicit action');
   await corruptPage.close();
 
+  // Blocked site data has no payload to protect: the title must stay playable without saving.
+  const blockedPage = await context.newPage();
+  track(blockedPage);
+  await blockedPage.addInitScript(() => {
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      get() {
+        throw new DOMException('blocked', 'SecurityError');
+      },
+    });
+  });
+  await blockedPage.goto(baseURL, { waitUntil: 'networkidle' });
+  await blockedPage.locator('.storage-unavailable-banner').waitFor();
+  assert.equal(await blockedPage.locator('.corrupted-banner').count(), 0);
+  for (const id of ['btn-start-standard', 'btn-start-random', 'btn-start-practice']) {
+    assert.equal(await blockedPage.locator(`#${id}`).isDisabled(), false);
+  }
+  await blockedPage.locator('#btn-start-standard').click();
+  await blockedPage.getByText('第 1 日 朝').waitFor();
+  await blockedPage.locator('.storage-unavailable-banner').waitFor();
+  await blockedPage.screenshot({ path: `${artifactsDir}/04b-storage-unavailable.png`, fullPage: true });
+  results.push('storage: blocked site data shows an unsaved-play notice and still allows a new cycle');
+  await blockedPage.close();
+
   // Releasing a movement key while the window is unfocused must not leave it held.
   await page.evaluate(() => window.dispatchEvent(new Event('blur')));
   await page.locator('#btn-resume-trial').click();

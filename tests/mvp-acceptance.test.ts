@@ -595,20 +595,31 @@ describe('ストレージ障害時の保護（統合版で追加）', () => {
     expect(storage.getItem(SAVE_STORAGE_KEY)).toBe(corrupted);
   });
 
-  it('localStorageの取得自体が拒否された場合も例外ではなく保存障害として扱う', () => {
+  it('localStorageの取得自体が拒否された場合は破損ではなく保存不可として扱う', () => {
     const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
     Object.defineProperty(globalThis, 'window', {
       configurable: true,
       value: { get localStorage() { throw new Error('SecurityError'); } },
     });
     try {
-      expect(loadGameState().status).toBe('corrupted');
+      expect(loadGameState().status).toBe('unavailable');
       expect(saveGameState(createInitialGameState())).toBe(false);
       expect(archiveCorruptedAndClearSave()).toBe(false);
     } finally {
       if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
       else Reflect.deleteProperty(globalThis, 'window');
     }
+  });
+
+  it('保存枠の読み取りだけが失敗する場合も保存不可として扱う', () => {
+    const unreadable: StorageBackend = {
+      getItem() { throw new Error('SecurityError'); },
+      setItem() {},
+      removeItem() {},
+    };
+    expect(loadGameState(unreadable).status).toBe('unavailable');
+    // Without reading the slot first, saving could overwrite a save that was never inspected.
+    expect(saveGameState(createInitialGameState(), unreadable)).toBe(false);
   });
 
   it('保存容量エラーでも例外を投げず、既存の正常なセーブを保持する', () => {

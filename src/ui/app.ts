@@ -70,6 +70,8 @@ export class NeedToKnowApp {
   private lastFrameTime = 0;
   private lastAutoSaveAt = 0;
   private saveFailureReported = false;
+  // Set when the storage area could not be read at startup. Play continues unsaved.
+  private storageUnavailableNotice: string | null = null;
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -80,6 +82,10 @@ export class NeedToKnowApp {
       this.state = createInitialGameState(INITIAL_FIXED_SEED);
       this.state.cycle.phase = 'title';
       this.state.corruptedSaveNotice = loaded.error;
+    } else if (loaded.status === 'unavailable') {
+      this.state = createInitialGameState(INITIAL_FIXED_SEED);
+      this.state.cycle.phase = 'title';
+      this.storageUnavailableNotice = loaded.error;
     } else {
       this.state = createInitialGameState(INITIAL_FIXED_SEED);
       this.state.cycle.phase = 'title';
@@ -97,6 +103,10 @@ export class NeedToKnowApp {
   private autoSave(): void {
     if (this.state.corruptedSaveNotice) {
       // Do not overwrite corrupted save until user explicitly resolves it (AC15)
+      return;
+    }
+    if (this.storageUnavailableNotice) {
+      // The banner already tells the player that progress is not saved.
       return;
     }
     if (this.state.cycle.phase === 'title') {
@@ -507,6 +517,21 @@ export class NeedToKnowApp {
             <button type="button" class="btn-danger" id="btn-resolve-corrupted">
               元データをバックアップ保管して新規初期化を許可
             </button>
+          </div>
+        `
+            : ''
+        }
+
+        ${
+          this.storageUnavailableNotice
+            ? `
+          <div class="storage-unavailable-banner" role="status">
+            <div>
+              <strong>【保存できません】</strong>
+              <p>${this.escapeHtml(
+                this.storageUnavailableNotice
+              )}<br>このまま遊べますが、進行は保存されず、ページを閉じると失われます。</p>
+            </div>
           </div>
         `
             : ''

@@ -157,6 +157,9 @@ function isValidSerializedSave(obj: unknown): obj is SerializedSaveRecords {
 export type LoadSaveResult =
   | { status: 'empty' }
   | { status: 'ok'; state: GameState }
+  // The storage area itself cannot be read (e.g. blocked site data). There is
+  // no payload to protect, so this must not be treated as a corrupted save.
+  | { status: 'unavailable'; error: string }
   | {
       status: 'corrupted';
       error: string;
@@ -194,6 +197,7 @@ export function saveGameState(
  * - Restores active trials in paused state ('pause_menu') while preserving hazardTimer and clocks (AC03).
  * - If save data is corrupted/unreadable, preserves the original data without overwriting it or silently
  *   replacing it with a fresh game (AC15).
+ * - If the storage area itself cannot be read, reports 'unavailable' so play can continue unsaved.
  */
 export function loadGameState(
   backend: StorageBackend = getDefaultStorageBackend()
@@ -201,10 +205,8 @@ export function loadGameState(
   const stored = tryGetItem(backend, SAVE_STORAGE_KEY);
   if (!stored.ok) {
     return {
-      status: 'corrupted',
+      status: 'unavailable',
       error: '保存領域を読み取れませんでした。ブラウザのストレージ設定を確認してください。',
-      rawOriginal: '',
-      originalPreserved: false,
     };
   }
   const raw = stored.value;
