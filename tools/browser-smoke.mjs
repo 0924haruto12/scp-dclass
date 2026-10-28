@@ -76,6 +76,7 @@ const readState = (target = page) =>
       day: state.cycle.day,
       trialStatus: state.trial?.status ?? null,
       x: state.trial?.player.x ?? null,
+      moveMode: state.trial?.player.moveMode ?? null,
       clock: state.trial?.externalClock ?? null,
       hazard: state.trial?.hazardTimer ?? null,
       gait: state.trial?.gait.state ?? null,
@@ -177,6 +178,9 @@ try {
   );
   await corruptPage.reload({ waitUntil: 'networkidle' });
   await corruptPage.locator('.corrupted-banner').waitFor();
+  for (const id of ['btn-start-standard', 'btn-start-random', 'btn-start-practice']) {
+    assert.equal(await corruptPage.locator(`#${id}`).isDisabled(), true);
+  }
   const preserved = await corruptPage.evaluate(
     ([key, backup]) => ({
       raw: localStorage.getItem(key),
@@ -198,6 +202,67 @@ try {
   assert.equal(afterResolve.backup, corrupted);
   results.push('storage: corrupted payload preserved and archived only on explicit action');
   await corruptPage.close();
+
+  // Blocked site data has no payload to protect: the title must stay playable without saving.
+  const blockedPage = await context.newPage();
+  track(blockedPage);
+  await blockedPage.addInitScript(() => {
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      get() {
+        throw new DOMException('blocked', 'SecurityError');
+      },
+    });
+  });
+  await blockedPage.goto(baseURL, { waitUntil: 'networkidle' });
+  await blockedPage.locator('.storage-unavailable-banner').waitFor();
+  assert.equal(await blockedPage.locator('.corrupted-banner').count(), 0);
+  for (const id of ['btn-start-standard', 'btn-start-random', 'btn-start-practice']) {
+    assert.equal(await blockedPage.locator(`#${id}`).isDisabled(), false);
+  }
+  await blockedPage.locator('#btn-start-standard').click();
+  await blockedPage.getByText('第 1 日 朝').waitFor();
+  await blockedPage.locator('.storage-unavailable-banner').waitFor();
+  await blockedPage.screenshot({ path: `${artifactsDir}/04b-storage-unavailable.png`, fullPage: true });
+  results.push('storage: blocked site data shows an unsaved-play notice and still allows a new cycle');
+  await blockedPage.close();
+
+  // Releasing a movement key while the window is unfocused must not leave it held.
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+  await page.locator('#btn-resume-trial').click();
+  await page.keyboard.down('d');
+  await page.waitForTimeout(150);
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+  await page.locator('#btn-resume-trial').click();
+  const afterBlur = await readState();
+  await page.waitForTimeout(350);
+  const afterResume = await readState();
+  assert.ok(Math.abs(afterResume.x - afterBlur.x) < 0.01, 'movement continued after blur');
+  await page.keyboard.up('d');
+  results.push('input: movement keys are cleared when focus is lost');
+
+  // macOS Option changes e.key (Option+D is "∂"); replay those events and
+  // check that slow walking works and the key is released on keyup.
+  const sendKey = (type, key, code, altKey) =>
+    page.evaluate(
+      ([eventType, eventKey, eventCode, alt]) =>
+        window.dispatchEvent(new KeyboardEvent(eventType, { key: eventKey, code: eventCode, altKey: alt })),
+      [type, key, code, altKey]
+    );
+  await sendKey('keydown', 'Alt', 'AltLeft', true);
+  await sendKey('keydown', '∂', 'KeyD', true);
+  const optionStart = await readState();
+  await page.waitForTimeout(300);
+  const optionMoving = await readState();
+  assert.ok(optionMoving.x > optionStart.x + 0.05, 'Option+D did not move the player');
+  assert.equal(optionMoving.moveMode, 'slow');
+  await sendKey('keyup', '∂', 'KeyD', true);
+  await sendKey('keyup', 'Alt', 'AltLeft', false);
+  const optionReleased = await readState();
+  await page.waitForTimeout(300);
+  const optionAfter = await readState();
+  assert.ok(Math.abs(optionAfter.x - optionReleased.x) < 0.01, 'movement continued after Option+D keyup');
+  results.push('input: macOS Option+D slow-walks and releases by physical key');
 
   // Narrow viewport must not overflow horizontally.
   await page.setViewportSize({ width: 390, height: 844 });

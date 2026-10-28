@@ -70,6 +70,8 @@ export class NeedToKnowApp {
   private lastFrameTime = 0;
   private lastAutoSaveAt = 0;
   private saveFailureReported = false;
+  // Set when the storage area could not be read at startup. Play continues unsaved.
+  private storageUnavailableNotice: string | null = null;
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -80,6 +82,10 @@ export class NeedToKnowApp {
       this.state = createInitialGameState(INITIAL_FIXED_SEED);
       this.state.cycle.phase = 'title';
       this.state.corruptedSaveNotice = loaded.error;
+    } else if (loaded.status === 'unavailable') {
+      this.state = createInitialGameState(INITIAL_FIXED_SEED);
+      this.state.cycle.phase = 'title';
+      this.storageUnavailableNotice = loaded.error;
     } else {
       this.state = createInitialGameState(INITIAL_FIXED_SEED);
       this.state.cycle.phase = 'title';
@@ -99,6 +105,10 @@ export class NeedToKnowApp {
       // Do not overwrite corrupted save until user explicitly resolves it (AC15)
       return;
     }
+    if (this.storageUnavailableNotice) {
+      // The banner already tells the player that progress is not saved.
+      return;
+    }
     if (this.state.cycle.phase === 'title') {
       return;
     }
@@ -111,13 +121,14 @@ export class NeedToKnowApp {
     if (!this.saveFailureReported) {
       this.saveFailureReported = true;
       this.state.lastActionLog.push(
-        '[保存] 保存に失敗しました。ブラウザの空き容量・ストレージ設定を確認してください。元のデータは保持されています。'
+        '[保存] 保存に失敗しました。ブラウザの空き容量・ストレージ設定を確認してください。'
       );
     }
   }
 
   private setupGlobalListeners(): void {
     window.addEventListener('blur', () => {
+      this.keysDown.clear();
       if (this.state.trial && this.state.trial.status === 'active') {
         setTrialPause(this.state.trial, 'blur');
         this.autoSave();
@@ -132,6 +143,7 @@ export class NeedToKnowApp {
 
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState !== 'hidden') return;
+      this.keysDown.clear();
       if (this.state.trial && this.state.trial.status === 'active') {
         setTrialPause(this.state.trial, 'blur');
       }
@@ -144,15 +156,19 @@ export class NeedToKnowApp {
         return;
       }
 
-      const key = e.key.toLowerCase();
-      this.keysDown.add(key);
+      // Match physical keys: on macOS, Option changes e.key (Option+D is "∂"),
+      // which broke Alt-held slow walking and left keys held after keyup.
+      const code = e.code;
+      this.keysDown.add(code);
 
-      if (key === 'n') {
+      if (e.repeat && (code === 'KeyN' || code === 'Escape' || code === 'KeyP' || code === 'KeyC')) return;
+
+      if (code === 'KeyN') {
         e.preventDefault();
         this.toggleNotebook();
         return;
       }
-      if (key === 'escape' || key === 'p') {
+      if (code === 'Escape' || code === 'KeyP') {
         e.preventDefault();
         this.togglePauseOrSettings();
         return;
@@ -160,15 +176,15 @@ export class NeedToKnowApp {
 
       if (this.state.cycle.phase === 'trial' && this.state.trial) {
         const trial = this.state.trial;
-        if (key === 'c') {
+        if (code === 'KeyC') {
           e.preventDefault();
           trial.player.slowToggle = !trial.player.slowToggle;
           this.renderUI();
-        } else if (key === 'q') {
+        } else if (code === 'KeyQ') {
           trial.player.facingAngle -= 0.35;
-        } else if (key === 'e') {
+        } else if (code === 'KeyE') {
           trial.player.facingAngle += 0.35;
-        } else if (key === 'f') {
+        } else if (code === 'KeyF') {
           e.preventDefault();
           this.interactNearestObject();
         }
@@ -176,7 +192,7 @@ export class NeedToKnowApp {
     });
 
     window.addEventListener('keyup', (e) => {
-      this.keysDown.delete(e.key.toLowerCase());
+      this.keysDown.delete(e.code);
     });
   }
 
@@ -224,19 +240,20 @@ export class NeedToKnowApp {
       moveY = this.manualMoveOverride.moveY;
       moveMode = this.manualMoveOverride.mode;
     } else {
-      if (this.keysDown.has('d') || this.keysDown.has('arrowright')) moveX += 1;
-      if (this.keysDown.has('a') || this.keysDown.has('arrowleft')) moveX -= 1;
-      if (this.keysDown.has('s') || this.keysDown.has('arrowdown')) moveY += 1;
-      if (this.keysDown.has('w') || this.keysDown.has('arrowup')) moveY -= 1;
+      const held = (...codes: string[]) => codes.some((code) => this.keysDown.has(code));
+      if (held('KeyD', 'ArrowRight')) moveX += 1;
+      if (held('KeyA', 'ArrowLeft')) moveX -= 1;
+      if (held('KeyS', 'ArrowDown')) moveY += 1;
+      if (held('KeyW', 'ArrowUp')) moveY -= 1;
 
-      if (this.keysDown.has(' ')) {
+      if (held('Space')) {
         moveX = 0;
         moveY = 0;
         moveMode = 'stop';
       } else if (moveX !== 0 || moveY !== 0) {
-        if (this.keysDown.has('shift')) {
+        if (held('ShiftLeft', 'ShiftRight')) {
           moveMode = 'run';
-        } else if (this.keysDown.has('alt') || trial.player.slowToggle) {
+        } else if (held('AltLeft', 'AltRight') || trial.player.slowToggle) {
           moveMode = 'slow';
         } else {
           moveMode = 'normal';
@@ -498,11 +515,26 @@ export class NeedToKnowApp {
               <strong>【保存データ破損警告 (AC15保護作動)】</strong>
               <p>${this.escapeHtml(
                 this.state.corruptedSaveNotice
-              )}<br>元の破損データは上書きされずそのまま保護されています。自動的に新規データで置換することはしません。</p>
+              )}<br>保存領域を確認するまで新規開始を停止します。自動的に新規データで置換することはしません。</p>
             </div>
             <button type="button" class="btn-danger" id="btn-resolve-corrupted">
               元データをバックアップ保管して新規初期化を許可
             </button>
+          </div>
+        `
+            : ''
+        }
+
+        ${
+          this.storageUnavailableNotice
+            ? `
+          <div class="storage-unavailable-banner" role="status">
+            <div>
+              <strong>【保存できません】</strong>
+              <p>${this.escapeHtml(
+                this.storageUnavailableNotice
+              )}<br>このまま遊べますが、進行は保存されず、ページを閉じると失われます。</p>
+            </div>
           </div>
         `
             : ''
@@ -632,13 +664,13 @@ export class NeedToKnowApp {
           </div>
 
           <div class="title-actions">
-            <button type="button" class="btn-primary" id="btn-start-standard">
+            <button type="button" class="btn-primary" id="btn-start-standard" ${this.state.corruptedSaveNotice ? 'disabled' : ''}>
               新規サイクル開始（初回固定Seed: FIXED-DEFAULT）
             </button>
-            <button type="button" class="btn-secondary" id="btn-start-random">
+            <button type="button" class="btn-secondary" id="btn-start-random" ${this.state.corruptedSaveNotice ? 'disabled' : ''}>
               新規ランダムSeedサイクル開始（変動パラメータ再抽選）
             </button>
-            <button type="button" class="btn-secondary" id="btn-start-practice">
+            <button type="button" class="btn-secondary" id="btn-start-practice" ${this.state.corruptedSaveNotice ? 'disabled' : ''}>
               学習用・固定Seed再試行モードで開始
             </button>
           </div>
@@ -1618,6 +1650,7 @@ export class NeedToKnowApp {
 
     // Title buttons
     document.getElementById('btn-start-standard')?.addEventListener('click', () => {
+      if (this.state.corruptedSaveNotice) return;
       this.state = createInitialGameState(
         INITIAL_FIXED_SEED,
         this.state.reportArchive,
@@ -1628,11 +1661,13 @@ export class NeedToKnowApp {
       this.renderUI();
     });
     document.getElementById('btn-start-random')?.addEventListener('click', () => {
+      if (this.state.corruptedSaveNotice) return;
       this.state = startNewCycle(this.state, `SEED-${Date.now()}`, false);
       this.autoSave();
       this.renderUI();
     });
     document.getElementById('btn-start-practice')?.addEventListener('click', () => {
+      if (this.state.corruptedSaveNotice) return;
       this.state = startNewCycle(this.state, INITIAL_FIXED_SEED, true);
       this.autoSave();
       this.renderUI();

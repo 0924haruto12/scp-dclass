@@ -1,7 +1,9 @@
 import {
   ComparisonInterviewState,
+  CyclePhase,
   DeferredEvent,
   FacilityCycle,
+  FixedAnomalyParams,
   GameState,
   ReportArchive,
   Subject,
@@ -49,8 +51,18 @@ export class MemoryStorageBackend implements StorageBackend {
 }
 
 export function getDefaultStorageBackend(): StorageBackend {
-  if (typeof window !== 'undefined' && window.localStorage) {
-    return window.localStorage;
+  if (typeof window !== 'undefined') {
+    try {
+      return window.localStorage;
+    } catch {
+      // Accessing the localStorage property itself can throw a SecurityError.
+      // Do not pretend an ephemeral in-memory save was persisted.
+      return {
+        getItem() { throw new Error('Storage unavailable'); },
+        setItem() { throw new Error('Storage unavailable'); },
+        removeItem() { throw new Error('Storage unavailable'); },
+      };
+    }
   }
   return new MemoryStorageBackend();
 }
@@ -89,6 +101,46 @@ export function serializeGameState(state: GameState): string {
   return JSON.stringify(payload);
 }
 
+// Keyed by every member of each union, so adding a value to the type without
+// listing it here is a compile error instead of valid saves being rejected.
+const CYCLE_PHASES: Record<CyclePhase, true> = {
+  title: true,
+  morning_comparison: true,
+  morning: true,
+  briefing: true,
+  trial: true,
+  debrief: true,
+  death_report: true,
+  night: true,
+  final_eval: true,
+  ending: true,
+};
+
+const FIXED_PARAM_VALUES: {
+  [K in keyof FixedAnomalyParams]: Record<FixedAnomalyParams[K], true>;
+} = {
+  gaitAllowedSpeed: { 1.5: true, 2.5: true },
+  badgeTargetFate: { hazard_assignment: true, ration_priority: true },
+  waterCoolerDelayDays: { 2: true, 3: true },
+  whiteDoorTimeRatio: { 1: true, 2: true },
+};
+
+function isListedValue(table: object, value: unknown, type: 'string' | 'number'): boolean {
+  // The type check keeps "2" from matching the numeric key 2.
+  return typeof value === type && Object.hasOwn(table, value as PropertyKey);
+}
+
+function hasValidFixedParams(params: unknown): params is FixedAnomalyParams {
+  if (!params || typeof params !== 'object') return false;
+  const p = params as Record<string, unknown>;
+  return (
+    isListedValue(FIXED_PARAM_VALUES.gaitAllowedSpeed, p.gaitAllowedSpeed, 'number') &&
+    isListedValue(FIXED_PARAM_VALUES.badgeTargetFate, p.badgeTargetFate, 'string') &&
+    isListedValue(FIXED_PARAM_VALUES.waterCoolerDelayDays, p.waterCoolerDelayDays, 'number') &&
+    isListedValue(FIXED_PARAM_VALUES.whiteDoorTimeRatio, p.whiteDoorTimeRatio, 'number')
+  );
+}
+
 function isValidSerializedSave(obj: unknown): obj is SerializedSaveRecords {
   if (!obj || typeof obj !== 'object') return false;
   const r = obj as Record<string, unknown>;
@@ -99,11 +151,14 @@ function isValidSerializedSave(obj: unknown): obj is SerializedSaveRecords {
     !cycle ||
     typeof cycle.cycleId !== 'string' ||
     typeof cycle.seed !== 'string' ||
-    typeof cycle.day !== 'number' ||
+    !Number.isInteger(cycle.day) ||
     cycle.day < 1 ||
     cycle.day > RUN_LENGTH_DAYS ||
-    !cycle.fixedParams ||
-    !Array.isArray(cycle.processedEventIds)
+    !isListedValue(CYCLE_PHASES, cycle.phase, 'string') ||
+    !hasValidFixedParams(cycle.fixedParams) ||
+    !Array.isArray(cycle.envelope) ||
+    !Array.isArray(cycle.processedEventIds) ||
+    !cycle.processedEventIds.every((id) => typeof id === 'string')
   ) {
     return false;
   }
@@ -112,11 +167,26 @@ function isValidSerializedSave(obj: unknown): obj is SerializedSaveRecords {
     typeof subject.subjectId !== 'string' ||
     typeof subject.C !== 'number' ||
     typeof subject.S !== 'number' ||
-    typeof subject.E !== 'number'
+    typeof subject.E !== 'number' ||
+    !Array.isArray(subject.inventory) ||
+    !Array.isArray(subject.mandatoryEquipment) ||
+    !Array.isArray(subject.rewardedEventKeys) ||
+    !subject.rewardedEventKeys.every((key) => typeof key === 'string') ||
+    !Array.isArray(subject.observedEvidenceIds) ||
+    !subject.portableNote ||
+    !Array.isArray(subject.portableNote.observations) ||
+    !Array.isArray(subject.portableNote.rumors) ||
+    !Array.isArray(subject.portableNote.hypotheses)
   ) {
     return false;
   }
   if (!Array.isArray(r.DeferredEvent) || !Array.isArray(r.ReportArchive)) {
+    return false;
+  }
+  if (r.Trial !== null) {
+    const trial = r.Trial as Trial | undefined;
+    if (!trial || typeof trial !== 'object' || !trial.player || !trial.omen || !trial.gait || !Array.isArray(trial.interactables)) return false;
+  } else if (cycle.phase === 'trial') {
     return false;
   }
   return true;
@@ -125,6 +195,9 @@ function isValidSerializedSave(obj: unknown): obj is SerializedSaveRecords {
 export type LoadSaveResult =
   | { status: 'empty' }
   | { status: 'ok'; state: GameState }
+  // The storage area itself cannot be read (e.g. blocked site data). There is
+  // no payload to protect, so this must not be treated as a corrupted save.
+  | { status: 'unavailable'; error: string }
   | {
       status: 'corrupted';
       error: string;
@@ -146,14 +219,9 @@ export function saveGameState(
   }
   const existingRaw = existing.value;
   if (existingRaw !== null) {
-    try {
-      const parsed = JSON.parse(existingRaw);
-      if (!isValidSerializedSave(parsed)) {
-        trySetItem(backend, CORRUPTED_BACKUP_KEY, existingRaw);
-        return false;
-      }
-    } catch {
-      trySetItem(backend, CORRUPTED_BACKUP_KEY, existingRaw);
+    // Use the same migration and restoration checks as loading: a payload may
+    // pass the shallow schema check but still fail while restoring nested data.
+    if (loadGameState(backend).status !== 'ok') {
       return false;
     }
   }
@@ -167,6 +235,7 @@ export function saveGameState(
  * - Restores active trials in paused state ('pause_menu') while preserving hazardTimer and clocks (AC03).
  * - If save data is corrupted/unreadable, preserves the original data without overwriting it or silently
  *   replacing it with a fresh game (AC15).
+ * - If the storage area itself cannot be read, reports 'unavailable' so play can continue unsaved.
  */
 export function loadGameState(
   backend: StorageBackend = getDefaultStorageBackend()
@@ -174,10 +243,8 @@ export function loadGameState(
   const stored = tryGetItem(backend, SAVE_STORAGE_KEY);
   if (!stored.ok) {
     return {
-      status: 'corrupted',
+      status: 'unavailable',
       error: '保存領域を読み取れませんでした。ブラウザのストレージ設定を確認してください。',
-      rawOriginal: '',
-      originalPreserved: false,
     };
   }
   const raw = stored.value;
