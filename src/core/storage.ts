@@ -15,6 +15,10 @@ import { ensureThirtyDaySchedule } from './engine';
 export const SAVE_STORAGE_KEY = 'need_to_know_mvp_save_v1';
 export const CORRUPTED_BACKUP_KEY = 'need_to_know_mvp_corrupted_backup_v1';
 
+// Raw payload this session last wrote successfully, per backend. It is known to
+// be valid, so autosave can skip re-validating it through loadGameState.
+const lastWrittenRaw = new WeakMap<StorageBackend, string>();
+
 /**
  * Separated record structure matching Section 9:
  * FacilityCycle, Subject, Trial, DeferredEvent, ReportArchive
@@ -218,7 +222,7 @@ export function saveGameState(
     return false;
   }
   const existingRaw = existing.value;
-  if (existingRaw !== null) {
+  if (existingRaw !== null && lastWrittenRaw.get(backend) !== existingRaw) {
     // Use the same migration and restoration checks as loading: a payload may
     // pass the shallow schema check but still fail while restoring nested data.
     if (loadGameState(backend).status !== 'ok') {
@@ -227,7 +231,11 @@ export function saveGameState(
   }
 
   const serialized = serializeGameState(state);
-  return trySetItem(backend, SAVE_STORAGE_KEY, serialized);
+  const saved = trySetItem(backend, SAVE_STORAGE_KEY, serialized);
+  if (saved) {
+    lastWrittenRaw.set(backend, serialized);
+  }
+  return saved;
 }
 
 /**
@@ -320,6 +328,15 @@ export function loadGameState(
     // intermediate 30-day build if its safe-task record exists; otherwise clear it.
     let legacySupervisorBadgeReset = false;
     let legacySupervisorBadgeInferred = false;
+    if (
+      restoredSubject.supervisorBadgeEarnedDay !== undefined &&
+      restoredSubject.supervisorBadgeEarnedDay !== null &&
+      !Number.isInteger(restoredSubject.supervisorBadgeEarnedDay)
+    ) {
+      // A hand-edited or intermediate save may store the day as a string. The
+      // escape branch compares it strictly, so normalize it before that check.
+      restoredSubject.supervisorBadgeEarnedDay = null;
+    }
     if (restoredSubject.supervisorBadgeEarnedDay === undefined) {
       restoredSubject.supervisorBadgeEarnedDay = null;
       const day29TaskKey = `night-safe-task-d${SAFE_REEVAL_UNLOCK_DAY}-${restoredSubject.subjectId}`;
@@ -428,6 +445,7 @@ export function archiveCorruptedAndClearSave(
   }
   try {
     backend.removeItem(SAVE_STORAGE_KEY);
+    lastWrittenRaw.delete(backend);
     return true;
   } catch {
     return false;

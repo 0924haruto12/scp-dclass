@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   applyMemoryTreatment,
   concludeTrialPhase,
@@ -74,7 +74,6 @@ describe('NEED TO KNOW MVP Acceptance Criteria (AC01 - AC15)', () => {
   it('AC02: New subject has C/S/E and personal effects initialized, and old subject water cooler event is cancelled', () => {
     const state = createInitialGameState('FIXED-DEFAULT');
     state.cycle.day = 2;
-    state.cycle.waterCoolerPresent = true;
     const oldSubjectId = state.subject.subjectId;
 
     // Drink from water cooler on Day 2 (grants C+1 and schedules duplicate event)
@@ -116,7 +115,6 @@ describe('NEED TO KNOW MVP Acceptance Criteria (AC01 - AC15)', () => {
     const storage = new MemoryStorageBackend();
     const state = createInitialGameState('FIXED-DEFAULT');
     state.cycle.day = 2;
-    state.cycle.waterCoolerPresent = true;
     interactWaterCoolerInMorning(state, 'drink');
     expect(state.subject.C).toBe(1);
 
@@ -375,7 +373,6 @@ describe('NEED TO KNOW MVP Acceptance Criteria (AC01 - AC15)', () => {
       const state = createInitialGameState('FIXED-DEFAULT');
       state.cycle.fixedParams.waterCoolerDelayDays = delay;
       state.cycle.day = 2;
-      state.cycle.waterCoolerPresent = true;
 
       interactWaterCoolerInMorning(state, 'drink');
       // Force C back to 0 to test survival from C=0
@@ -543,6 +540,22 @@ describe('NEED TO KNOW MVP Acceptance Criteria (AC01 - AC15)', () => {
     const fresh = createInitialGameState('FIXED-DEFAULT');
     const saveAllowed = saveGameState(fresh, storage);
     expect(saveAllowed).toBe(false);
+    expect(storage.getItem(SAVE_STORAGE_KEY)).toBe(corruptedPayload);
+  });
+
+  it('AC15: Autosave skips re-validating its own last write but still refuses a corrupted payload written afterwards', () => {
+    const storage = new MemoryStorageBackend();
+    const state = createInitialGameState('FIXED-DEFAULT');
+    expect(saveGameState(state, storage)).toBe(true);
+
+    // One read for the overwrite check. A full reload would read the slot again.
+    const getItem = vi.spyOn(storage, 'getItem');
+    expect(saveGameState(state, storage)).toBe(true);
+    expect(getItem).toHaveBeenCalledTimes(1);
+
+    const corruptedPayload = '{ "schemaVersion": "1.0", "FacilityCycle": CORRUPTED_JSON ';
+    storage.setItem(SAVE_STORAGE_KEY, corruptedPayload);
+    expect(saveGameState(state, storage)).toBe(false);
     expect(storage.getItem(SAVE_STORAGE_KEY)).toBe(corruptedPayload);
   });
 });

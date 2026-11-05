@@ -753,9 +753,14 @@ button:disabled {
   padding: 12px 16px;
   border-radius: 6px;
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
   gap: 14px;
+}
+
+.corrupted-banner > div {
+  flex: 1 1 260px;
 }
 
 .storage-unavailable-banner {

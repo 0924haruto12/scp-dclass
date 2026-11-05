@@ -203,6 +203,43 @@ try {
   results.push('storage: corrupted payload preserved and archived only on explicit action');
   await corruptPage.close();
 
+  // If the backup cannot be written, the player can still start without saving,
+  // and the original payload stays in place.
+  const quotaPage = await context.newPage();
+  track(quotaPage);
+  await quotaPage.addInitScript((backup) => {
+    const setItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key, value) {
+      if (key === backup) throw new DOMException('quota', 'QuotaExceededError');
+      return setItem.call(this, key, value);
+    };
+  }, backupKey);
+  await quotaPage.setViewportSize({ width: 390, height: 844 });
+  await quotaPage.goto(baseURL, { waitUntil: 'networkidle' });
+  await quotaPage.evaluate(
+    ([key, value]) => localStorage.setItem(key, value),
+    [saveKey, corrupted]
+  );
+  await quotaPage.reload({ waitUntil: 'networkidle' });
+  await quotaPage.locator('.corrupted-banner').waitFor();
+  assert.equal(await quotaPage.locator('#btn-start-without-saving').count(), 0);
+  await quotaPage.locator('#btn-resolve-corrupted').click();
+  await quotaPage.locator('#btn-start-without-saving').waitFor();
+  const quotaOverflow = await quotaPage.evaluate(
+    () => document.documentElement.scrollWidth - window.innerWidth
+  );
+  assert.ok(quotaOverflow <= 0, `corrupted banner overflows by ${quotaOverflow}px`);
+  await quotaPage.screenshot({ path: `${artifactsDir}/04a-backup-failed.png`, fullPage: true });
+  await quotaPage.locator('#btn-start-without-saving').click();
+  await quotaPage.getByText('第 1 日 朝').waitFor();
+  await quotaPage.locator('.storage-unavailable-banner').waitFor();
+  assert.equal(await quotaPage.locator('.corrupted-banner').count(), 0);
+  await quotaPage.getByRole('button', { name: /召集へ進む/ }).first().click();
+  const quotaRaw = await quotaPage.evaluate((key) => localStorage.getItem(key), saveKey);
+  assert.equal(quotaRaw, corrupted);
+  results.push('storage: failed backup offers an unsaved start and keeps the original payload');
+  await quotaPage.close();
+
   // Blocked site data has no payload to protect: the title must stay playable without saving.
   const blockedPage = await context.newPage();
   track(blockedPage);
@@ -263,6 +300,20 @@ try {
   const optionAfter = await readState();
   assert.ok(Math.abs(optionAfter.x - optionReleased.x) < 0.01, 'movement continued after Option+D keyup');
   results.push('input: macOS Option+D slow-walks and releases by physical key');
+
+  // Action keys are physical too. Option changes e.key here as well, and on AZERTY
+  // the key labelled Q sits at KeyA, where it must only strafe.
+  const readFacing = () =>
+    page.evaluate(() => window.__NTK_APP__.getState().trial.player.facingAngle);
+  const facingBeforeOption = await readFacing();
+  await sendKey('keydown', 'œ', 'KeyQ', true);
+  await sendKey('keyup', 'œ', 'KeyQ', true);
+  assert.ok((await readFacing()) < facingBeforeOption, 'Option+Q did not rotate the view');
+  const facingBeforeAzerty = await readFacing();
+  await sendKey('keydown', 'q', 'KeyA', false);
+  await sendKey('keyup', 'q', 'KeyA', false);
+  assert.equal(await readFacing(), facingBeforeAzerty, 'AZERTY Q both strafed and rotated');
+  results.push('input: action keys follow the physical key, including while Option is held');
 
   // Narrow viewport must not overflow horizontally.
   await page.setViewportSize({ width: 390, height: 844 });
