@@ -114,8 +114,6 @@ export interface FacilityCycle {
   schedule: DayScheduleEntry[];
   envelope: EnvelopeItem[]; // Max 3 items under bunk bed
   envelopeOpenedToday: boolean;
-  waterCoolerPresent: boolean;
-  waterCoolerInstallDay: number | null; // Day of the current water-cooler placement (2 / 12 / 22)
   processedEventIds: string[]; // Prevents duplicate execution on resume
   endingResult: EndingType | null;
 }

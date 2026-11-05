@@ -13,6 +13,11 @@ export const RUN_LENGTH_DAYS = 30;
 /** 共用室の給水器が設置される朝。各設置回ごとに別の遅効イベントとして扱う。 */
 export const WATER_COOLER_INSTALL_DAYS: readonly number[] = [2, 12, 22];
 
+/** その日に給水器が設置されていれば日付を、そうでなければ null を返す。 */
+export function getWaterCoolerInstallDay(day: number): number | null {
+  return WATER_COOLER_INSTALL_DAYS.includes(day) ? day : null;
+}
+
 /** 同一人物がE=2へ到達できる指定評価業務。16日目と最終日（30日目）はT-101。 */
 export const ROLE_EVAL_DAYS: readonly number[] = [16, 30];
 
@@ -117,9 +122,6 @@ export const THIRTY_DAY_SCHEDULE: DayScheduleEntry[] = Array.from(
   }
 );
 
-/** @deprecated 7日MVPの互換用。新規実装は THIRTY_DAY_SCHEDULE を使う。 */
-export const SEVEN_DAY_SCHEDULE: DayScheduleEntry[] = THIRTY_DAY_SCHEDULE.slice(0, 7);
-
 export const ORIENTATION_DOCUMENT = {
   title: 'Dクラス職員 配属時交付文書 [様式 D-07]',
   body: [
@@ -188,7 +190,7 @@ export const CELLMATES: CellmateScript[] = [
           dialogue:
             '「今朝、共用室（W-00）にまた給水器が置かれた。管理票の設置日が空欄で、掲示板の点呼票には同じ番号が二重に印字されている。飲んだ翌々日から人数が合わないって話だ。」',
           rumorCard: {
-            id: 'rumor-w00-headcount',
+            id: `rumor-w00-headcount-d${day}`,
             statement: '「共用室の給水器を飲んだ者の房では、2〜3日後の点呼から人数が合わなくなる」',
             observedDayNote: `現サイクル第${day}日（点呼票の二重印字と一致）`,
           },

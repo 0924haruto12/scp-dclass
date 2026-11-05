@@ -3,11 +3,11 @@ import {
   CANONICAL_EVIDENCE,
   ENDING_DESCRIPTIONS,
   getDebriefChoices,
+  getWaterCoolerInstallDay,
   RUN_LENGTH_DAYS,
   SAFE_REEVAL_UNLOCK_DAY,
   SUPERVISOR_BADGE_CODE,
   THIRTY_DAY_SCHEDULE,
-  WATER_COOLER_INSTALL_DAYS,
 } from './content';
 import { deriveFixedAnomalyParams, INITIAL_FIXED_SEED } from './rng';
 import {
@@ -153,8 +153,6 @@ export function createInitialGameState(
     schedule: THIRTY_DAY_SCHEDULE.map((s) => ({ ...s })),
     envelope: [],
     envelopeOpenedToday: false,
-    waterCoolerPresent: false,
-    waterCoolerInstallDay: null,
     processedEventIds: [],
     endingResult: null,
   };
@@ -193,34 +191,17 @@ export function ensureThirtyDaySchedule(cycle: FacilityCycle): boolean {
   if (needsRepair) {
     cycle.schedule = THIRTY_DAY_SCHEDULE.map((entry) => ({ ...entry }));
   }
-  if (cycle.waterCoolerInstallDay === undefined) {
-    cycle.waterCoolerInstallDay =
-      cycle.waterCoolerPresent && WATER_COOLER_INSTALL_DAYS.includes(cycle.day)
-        ? cycle.day
-        : null;
-  }
   return needsRepair;
 }
 
-/** Returns the assignment for the current day, repairing a truncated schedule if needed. */
-export function getDayScheduleEntry(cycle: FacilityCycle): DayScheduleEntry {
-  ensureThirtyDaySchedule(cycle);
-  const safeDay = Math.min(Math.max(1, cycle.day), RUN_LENGTH_DAYS);
-  return (
-    cycle.schedule.find((entry) => entry.day === safeDay) ??
-    THIRTY_DAY_SCHEDULE[safeDay - 1] ??
-    THIRTY_DAY_SCHEDULE[0]
-  );
-}
-
 /**
- * Applies day-dependent setup. The water cooler is installed on a small number of
- * mornings per cycle; each placement creates its own delayed event.
+ * Returns the canonical assignment for the current day.
+ * The schedule is derived data: read it from the constant instead of a persisted
+ * copy, so a stale or tampered save cannot change room, researcher, or eval days.
  */
-export function prepareFacilityDay(cycle: FacilityCycle): void {
-  const sched = getDayScheduleEntry(cycle);
-  cycle.waterCoolerPresent = Boolean(sched.hasWaterCoolerSetup);
-  cycle.waterCoolerInstallDay = cycle.waterCoolerPresent ? cycle.day : null;
+export function getDayScheduleEntry(cycle: FacilityCycle): DayScheduleEntry {
+  const safeDay = Math.min(Math.max(1, cycle.day), RUN_LENGTH_DAYS);
+  return THIRTY_DAY_SCHEDULE[safeDay - 1] ?? THIRTY_DAY_SCHEDULE[0];
 }
 
 /**
@@ -439,12 +420,7 @@ export function interactWaterCoolerInMorning(
   action: 'inspect_clues' | 'drink' | 'skip'
 ): string {
   const { cycle, subject } = state;
-  const installDay =
-    cycle.waterCoolerInstallDay !== null && cycle.waterCoolerInstallDay === cycle.day
-      ? cycle.waterCoolerInstallDay
-      : WATER_COOLER_INSTALL_DAYS.includes(cycle.day)
-      ? cycle.day
-      : null;
+  const installDay = getWaterCoolerInstallDay(cycle.day);
 
   if (installDay === null) {
     return '現在、給水器の特別イベントはありません。';
@@ -458,12 +434,19 @@ export function interactWaterCoolerInMorning(
     return msg;
   }
 
+  // Drinking and skipping are a single decision per placement: once either is
+  // recorded, the other choice must not be available.
+  const drinkKey = `water-drink-d${installDay}-${subject.subjectId}`;
+  const skipKey = `water-skip-d${installDay}-${subject.subjectId}`;
+  if (
+    cycle.processedEventIds.includes(drinkKey) ||
+    cycle.processedEventIds.includes(skipKey)
+  ) {
+    return '本日の給水器の判断は既に記録済みです。';
+  }
+
   if (action === 'drink') {
-    const eventKey = `water-drink-d${installDay}-${subject.subjectId}`;
-    if (cycle.processedEventIds.includes(eventKey)) {
-      return '既に給水器の水を飲んでいます。';
-    }
-    cycle.processedEventIds.push(eventKey);
+    cycle.processedEventIds.push(drinkKey);
 
     // Grants C+1 once per placement as sample cooperation
     applySubjectDeltas(subject, 1, 0, 0);
@@ -490,10 +473,6 @@ export function interactWaterCoolerInMorning(
     return msg;
   }
 
-  const skipKey = `water-skip-d${installDay}-${subject.subjectId}`;
-  if (cycle.processedEventIds.includes(skipKey)) {
-    return '本日の給水器の判断は既に記録済みです。';
-  }
   cycle.processedEventIds.push(skipKey);
   const msg = '給水器の水には手をつけず、通常の配給水のみを確保した（脱水等の不利益なし）。';
   state.lastActionLog.push(msg);
@@ -975,7 +954,6 @@ export function proceedFromDeathReport(state: GameState): string {
   cycle.morningActionsLeft = 2;
   cycle.nightActionsLeft = 2;
   cycle.envelopeOpenedToday = false;
-  prepareFacilityDay(cycle);
   cycle.phase = 'morning';
 
   const msg = `【第${cycle.day}日 朝・被験者交代】前任者（${subject.subjectId}）の除籍に伴い、新規被験者「${newSubject.subjectId}」が同収容房へ配属された（施設の異常パラメータと寝台下の封筒は保持、個人のC/S/Eおよび予約イベントは初期化）。`;
@@ -1086,7 +1064,6 @@ export function proceedFromNightToNextDay(state: GameState): string {
   cycle.nightActionsLeft = 2;
   cycle.envelopeOpenedToday = false;
   state.trial = null;
-  prepareFacilityDay(cycle);
 
   // Badge effect expires at morning roll call of the day after wearing, leaving hazard_uncorrected if not reverified
   if (subject.badgeEffectUntilDay !== null && cycle.day >= subject.badgeEffectUntilDay) {
@@ -1135,23 +1112,15 @@ export function evaluateFinalDayOutcome(
   overrides?: {
     attemptedEscapeOnFinalDay?: boolean;
     diedOnFinalDay?: boolean;
-    /** @deprecated 7日MVP互換。 */
-    attemptedEscapeOnDay7Morning?: boolean;
-    /** @deprecated 7日MVP互換。 */
-    diedOnDay7?: boolean;
   }
 ): string {
   const { cycle, subject } = state;
 
   let chosenEnding: EndingType;
 
-  if (overrides?.attemptedEscapeOnFinalDay || overrides?.attemptedEscapeOnDay7Morning) {
+  if (overrides?.attemptedEscapeOnFinalDay) {
     chosenEnding = 'escape_attempt';
-  } else if (
-    overrides?.diedOnFinalDay ||
-    overrides?.diedOnDay7 ||
-    state.trial?.status === 'dead'
-  ) {
+  } else if (overrides?.diedOnFinalDay || state.trial?.status === 'dead') {
     chosenEnding = 'termination_shortage';
   } else if (
     state.trial?.status === 'survived' &&

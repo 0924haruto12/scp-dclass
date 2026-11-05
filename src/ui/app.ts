@@ -4,13 +4,13 @@ import {
   ENDING_DESCRIPTIONS,
   getDebriefChoices,
   getRunStage,
+  getWaterCoolerInstallDay,
   OPTIONAL_ITEM_LABELS,
   ORIENTATION_DOCUMENT,
   RESEARCHER_PROFILES,
   RUN_LENGTH_DAYS,
   SAFE_REEVAL_UNLOCK_DAY,
   SUPERVISOR_BADGE_CODE,
-  WATER_COOLER_INSTALL_DAYS,
 } from '../core/content';
 import {
   acquireOptionalItem,
@@ -72,6 +72,9 @@ export class NeedToKnowApp {
   private saveFailureReported = false;
   // Set when the storage area could not be read at startup. Play continues unsaved.
   private storageUnavailableNotice: string | null = null;
+  // Set when archiving a corrupted save failed (e.g. full quota). Offers an
+  // unsaved-start escape hatch instead of leaving the title buttons disabled.
+  private corruptedArchiveFailed = false;
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -158,6 +161,8 @@ export class NeedToKnowApp {
 
       // Match physical keys: on macOS, Option changes e.key (Option+D is "∂"),
       // which broke Alt-held slow walking and left keys held after keyup.
+      // Action keys use the same rule. Matching e.key would drop Q/E/F while Option
+      // is held, and on AZERTY the key labelled Q would both strafe and rotate.
       const code = e.code;
       this.keysDown.add(code);
 
@@ -520,6 +525,15 @@ export class NeedToKnowApp {
             <button type="button" class="btn-danger" id="btn-resolve-corrupted">
               元データをバックアップ保管して新規初期化を許可
             </button>
+            ${
+              this.corruptedArchiveFailed
+                ? `
+            <button type="button" class="btn-secondary" id="btn-start-without-saving">
+              退避できないまま、元データを保持して保存せずに新規開始
+            </button>
+          `
+                : ''
+            }
           </div>
         `
             : ''
@@ -731,12 +745,15 @@ export class NeedToKnowApp {
     if (cycle.phase === 'morning') {
       const sched = getDayScheduleEntry(cycle);
       const stage = getRunStage(cycle.day);
-      const waterCoolerInstallDay =
-        cycle.waterCoolerInstallDay !== null && cycle.waterCoolerInstallDay === cycle.day
-          ? cycle.waterCoolerInstallDay
-          : WATER_COOLER_INSTALL_DAYS.includes(cycle.day)
-          ? cycle.day
-          : null;
+      const waterCoolerInstallDay = getWaterCoolerInstallDay(cycle.day);
+      const waterDecisionRecorded =
+        waterCoolerInstallDay !== null &&
+        (cycle.processedEventIds.includes(
+          `water-drink-d${waterCoolerInstallDay}-${subject.subjectId}`
+        ) ||
+          cycle.processedEventIds.includes(
+            `water-skip-d${waterCoolerInstallDay}-${subject.subjectId}`
+          ));
       return `
         <div class="phase-card">
           <div class="phase-header-row">
@@ -779,20 +796,12 @@ export class NeedToKnowApp {
                   管理票・点呼票・医務記録を調べる（枠消費なし）
                 </button>
                 <button type="button" class="btn-secondary" id="btn-water-drink" ${
-                  cycle.processedEventIds.includes(
-                    `water-drink-d${waterCoolerInstallDay}-${subject.subjectId}`
-                  )
-                    ? 'disabled'
-                    : ''
+                  waterDecisionRecorded ? 'disabled' : ''
                 }>
                   給水器の水を飲む（サンプル協力 C+1）
                 </button>
                 <button type="button" class="btn-secondary" id="btn-water-skip" ${
-                  cycle.processedEventIds.includes(
-                    `water-skip-d${waterCoolerInstallDay}-${subject.subjectId}`
-                  )
-                    ? 'disabled'
-                    : ''
+                  waterDecisionRecorded ? 'disabled' : ''
                 }>
                   飲まない（通常の水だけ確保）
                 </button>
@@ -1640,11 +1649,28 @@ export class NeedToKnowApp {
         this.state.lastActionLog.push(
           '[保存] 破損データの退避に失敗したため、元データを削除せず保持しました。空き容量を確認してください。'
         );
+        // Do not leave the player with no way forward: offer an unsaved start
+        // that keeps the original corrupted payload untouched.
+        this.corruptedArchiveFailed = true;
         this.renderUI();
         return;
       }
+      this.corruptedArchiveFailed = false;
       this.state.corruptedSaveNotice = null;
       this.autoSave();
+      this.renderUI();
+    });
+
+    document.getElementById('btn-start-without-saving')?.addEventListener('click', () => {
+      this.corruptedArchiveFailed = false;
+      this.state = createInitialGameState(
+        INITIAL_FIXED_SEED,
+        this.state.reportArchive,
+        1,
+        false
+      );
+      this.storageUnavailableNotice =
+        '破損データを退避できなかったため、元データを保持したまま保存を停止しています。';
       this.renderUI();
     });
 

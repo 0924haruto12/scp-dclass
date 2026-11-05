@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   FINAL_DAY,
   getRunStage,
+  getWaterCoolerInstallDay,
   ROLE_EVAL_DAYS,
   RUN_LENGTH_DAYS,
   THIRTY_DAY_SCHEDULE,
@@ -10,16 +11,17 @@ import {
 import {
   concludeTrialPhase,
   createInitialGameState,
+  getDayScheduleEntry,
   handleComparisonInterviewAction,
   interactWaterCoolerInMorning,
   performSafeReevaluationTaskAtNight,
-  prepareFacilityDay,
   proceedFromDeathReport,
   proceedFromMorning,
   proceedFromNightToNextDay,
   startCurrentDayTrial,
   startNewCycle,
   submitDebriefResponse,
+  talkToCellmate,
 } from '../src/core/engine';
 import {
   loadGameState,
@@ -167,9 +169,7 @@ describe('30日間ラン', () => {
     const state = createInitialGameState('FIXED-DEFAULT');
     state.cycle.day = 12;
     state.cycle.phase = 'morning';
-    prepareFacilityDay(state.cycle);
-    expect(state.cycle.waterCoolerPresent).toBe(true);
-    expect(state.cycle.waterCoolerInstallDay).toBe(12);
+    expect(getWaterCoolerInstallDay(12)).toBe(12);
 
     const drinkMsg = interactWaterCoolerInMorning(state, 'drink');
     expect(drinkMsg).toContain('水を飲んだ');
@@ -196,7 +196,6 @@ describe('30日間ラン', () => {
 
     state.cycle.day = 2;
     state.cycle.phase = 'morning';
-    prepareFacilityDay(state.cycle);
     interactWaterCoolerInMorning(state, 'drink');
     state.subject.C = 0;
 
@@ -210,7 +209,6 @@ describe('30日間ラン', () => {
 
     state.cycle.day = 12;
     state.cycle.phase = 'morning';
-    prepareFacilityDay(state.cycle);
     interactWaterCoolerInMorning(state, 'drink');
     state.subject.C = 0;
 
@@ -230,9 +228,6 @@ describe('30日間ラン', () => {
     state.cycle.phase = 'night';
     state.cycle.schedule = state.cycle.schedule.slice(0, 7);
     state.cycle.version = '0.1.0';
-    state.cycle.waterCoolerPresent = true;
-    (state.cycle as unknown as { waterCoolerInstallDay?: number | null }).waterCoolerInstallDay =
-      undefined;
     state.subject.E = 2;
     state.subject.rewardedEventKeys.push(
       `role-eval-d4-${state.subject.subjectId}`,
@@ -284,8 +279,6 @@ describe('30日間ラン', () => {
     expect(loaded.state.cycle.processedEventIds).toContain(`water-drink-d2-${subjectId}`);
     loaded.state.cycle.day = 2;
     loaded.state.cycle.phase = 'morning';
-    loaded.state.cycle.waterCoolerPresent = true;
-    loaded.state.cycle.waterCoolerInstallDay = 2;
     const legacyDrinkMsg = interactWaterCoolerInMorning(loaded.state, 'drink');
     expect(legacyDrinkMsg).toContain('既に');
 
@@ -390,5 +383,79 @@ describe('30日間ラン', () => {
     expect(next.cycle.endingResult).toBeNull();
     expect(next.cycle.seed).toBe('SEED-NEXT-CYCLE');
     expect(next.reportArchive).toHaveLength(state.reportArchive.length);
+  });
+
+  it('給水器の飲む/飲まないは設置回ごとに一度だけ選べ、後から切り替えても効果が出ない', () => {
+    const state = createInitialGameState('FIXED-DEFAULT');
+    state.cycle.day = 12;
+    state.cycle.phase = 'morning';
+
+    interactWaterCoolerInMorning(state, 'skip');
+    const complianceAfterSkip = state.subject.C;
+    const afterSkip = interactWaterCoolerInMorning(state, 'drink');
+    expect(afterSkip).toContain('既に');
+    expect(state.subject.C).toBe(complianceAfterSkip);
+    expect(state.deferredEvents).toHaveLength(0);
+
+    state.cycle.day = 22;
+    interactWaterCoolerInMorning(state, 'drink');
+    expect(state.subject.C).toBe(complianceAfterSkip + 1);
+    const afterDrink = interactWaterCoolerInMorning(state, 'skip');
+    expect(afterDrink).toContain('既に');
+  });
+
+  it('保存データのスケジュールが古くても、当日の割当は正規の定数から導出する', () => {
+    const state = createInitialGameState('FIXED-DEFAULT');
+    state.cycle.day = 13;
+    state.cycle.schedule = state.cycle.schedule.map((entry) =>
+      entry.day === 13
+        ? {
+            ...entry,
+            roomCode: 'T-309',
+            researcher: 'Researcher-B',
+            isRoleEvalEligible: true,
+          }
+        : entry
+    );
+
+    const sched = getDayScheduleEntry(state.cycle);
+    expect(sched.roomCode).toBe(THIRTY_DAY_SCHEDULE[12].roomCode);
+    expect(sched.researcher).toBe(THIRTY_DAY_SCHEDULE[12].researcher);
+    expect(sched.isRoleEvalEligible).toBe(THIRTY_DAY_SCHEDULE[12].isRoleEvalEligible);
+  });
+
+  it('給水器の噂は設置回ごとにノートへ記録される', () => {
+    const state = createInitialGameState('FIXED-DEFAULT');
+
+    state.cycle.day = 2;
+    state.cycle.phase = 'morning';
+    state.cycle.morningActionsLeft = 2;
+    talkToCellmate(state, 'cm-observer', 'morning');
+
+    state.cycle.day = 12;
+    state.cycle.morningActionsLeft = 2;
+    talkToCellmate(state, 'cm-observer', 'morning');
+
+    const ids = state.subject.portableNote.rumors.map((rumor) => rumor.id);
+    expect(ids).toContain('rumor-w00-headcount-d2');
+    expect(ids).toContain('rumor-w00-headcount-d12');
+  });
+
+  it('監督用名札の支給日が文字列の保存は破損扱いにせず、名札を無効化する', () => {
+    const backend = new MemoryStorageBackend();
+    const state = createInitialGameState('FIXED-DEFAULT');
+    state.cycle.day = 30;
+    state.subject.hasSupervisorBadge = true;
+    state.subject.mandatoryEquipment = ['supervisor_badge'];
+    (state.subject as unknown as { supervisorBadgeEarnedDay: unknown })
+      .supervisorBadgeEarnedDay = '29';
+
+    expect(saveGameState(state, backend)).toBe(true);
+    const loaded = loadGameState(backend);
+    expect(loaded.status).toBe('ok');
+    if (loaded.status !== 'ok') return;
+
+    expect(loaded.state.subject.supervisorBadgeEarnedDay).toBeNull();
+    expect(loaded.state.subject.hasSupervisorBadge).toBe(false);
   });
 });
